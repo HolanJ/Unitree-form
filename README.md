@@ -42,6 +42,8 @@ Postup:
 3. V repozitáři nastavte **Settings -> Pages -> Build and deployment -> Source: GitHub Actions**.
 4. Po pushi se spustí workflow a nasadí obsah složky `dist`.
 
+V nastavení GitHub Pages musí být `Source` nastavené na `GitHub Actions`, ne na `Deploy from a branch`. Pokud je tam branch deploy, GitHub bude servírovat zdrojový `index.html` a stránka může být prázdná.
+
 Výsledná URL bude typicky:
 
 ```text
