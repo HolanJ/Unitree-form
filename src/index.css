@@ -71,6 +71,10 @@
   .link-danger {
     @apply border-0 bg-transparent p-0 font-bold text-red-700;
   }
+
+  .edit-hidden {
+    display: none !important;
+  }
 }
 
 @media print {
@@ -95,10 +99,6 @@
   }
 
   form {
-    display: block !important;
-  }
-
-  .edit-hidden {
     display: block !important;
   }
 

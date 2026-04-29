@@ -7,6 +7,7 @@ import Field from "./components/Field.jsx";
 import Checklist from "./components/Checklist.jsx";
 import PhotoUpload from "./components/PhotoUpload.jsx";
 import SignatureBox from "./components/SignatureBox.jsx";
+import Icon from "./components/Icon.jsx";
 import { issueChecklist, returnChecklist, robots } from "./data/checklists.js";
 
 const initialForm = {
@@ -30,6 +31,14 @@ const initialForm = {
   lenderSigner: "",
   borrowerSigner: ""
 };
+
+function HeadingIcon({ name }) {
+  return (
+    <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-mint-100 text-mint-700">
+      <Icon name={name} className="size-5" />
+    </span>
+  );
+}
 
 export default function App() {
   const [mode, setMode] = useState("issue");
@@ -79,17 +88,23 @@ export default function App() {
 
         <form className="grid gap-4">
           <SectionCard accent className="grid gap-5 md:grid-cols-[minmax(0,1fr)_280px]">
-            <div>
-              <p className="text-xs font-extrabold uppercase tracking-wider text-mint-700">Předávací protokol</p>
-              <h2 className="mt-1 text-3xl font-black leading-tight text-ink md:text-4xl">{protocolTitle}</h2>
-              <p className="mt-2 text-sm text-slate-600">Roboti Unitree: {selectedRobots.join(", ")}</p>
+            <div className="flex items-start gap-4">
+              <HeadingIcon name="file" />
+              <div>
+                <p className="text-xs font-extrabold uppercase tracking-wider text-mint-700">Předávací protokol</p>
+                <h2 className="mt-1 text-3xl font-black leading-tight text-ink md:text-4xl">{protocolTitle}</h2>
+                <p className="mt-2 text-sm text-slate-600">Roboti Unitree: {selectedRobots.join(", ")}</p>
+              </div>
             </div>
             <Field label="Datum vystavení" name="issueDate" type="date" value={form.issueDate} onChange={updateField} />
           </SectionCard>
 
           <SectionCard>
             <div className="section-heading">
-              <h3>Údaje o výpůjčce</h3>
+              <div className="flex items-center gap-3">
+                <HeadingIcon name="clipboard" />
+                <h3>Údaje o výpůjčce</h3>
+              </div>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
               <RobotPicker selectedRobots={selectedRobots} setSelectedRobots={setSelectedRobots} />
@@ -105,9 +120,12 @@ export default function App() {
 
           <SectionCard className={mode === "issue" ? "" : "edit-hidden"} data-section="issue">
             <div className="section-heading">
-              <div>
+              <div className="flex items-start gap-3">
+                <HeadingIcon name="shield" />
+                <div>
                 <h3>Vydání robota před půjčením</h3>
                 <p>Kontrola stavu, příslušenství a provozní připravenosti.</p>
+                </div>
               </div>
             </div>
             <div className="grid gap-4">
@@ -123,9 +141,12 @@ export default function App() {
 
           <SectionCard className={mode === "return" ? "" : "edit-hidden"} data-section="return">
             <div className="section-heading">
-              <div>
+              <div className="flex items-start gap-3">
+                <HeadingIcon name="rotate" />
+                <div>
                 <h3>Vrácení robota po výpůjčce</h3>
                 <p>Vyplňuje se při převzetí robota zpět.</p>
+                </div>
               </div>
             </div>
             <div className="grid gap-4">
@@ -143,7 +164,10 @@ export default function App() {
 
           <SectionCard>
             <div className="section-heading">
-              <h3>Poznámky a potvrzení</h3>
+              <div className="flex items-center gap-3">
+                <HeadingIcon name="signature" />
+                <h3>Poznámky a potvrzení</h3>
+              </div>
             </div>
             <Field label="Obecné poznámky" name="generalNote" value={form.generalNote} placeholder="Další ujednání, upozornění, odpovědnost za škody, servisní stav..." as="textarea" rows={5} onChange={updateField} />
             <div className="mt-4 rounded-lg border border-mint-200 bg-mint-50/80 p-4">

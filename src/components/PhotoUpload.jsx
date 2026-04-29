@@ -1,3 +1,5 @@
+import Icon from "./Icon.jsx";
+
 export default function PhotoUpload({ photos, setPhotos }) {
   const readPhoto = (file) => {
     return new Promise((resolve, reject) => {
@@ -22,7 +24,12 @@ export default function PhotoUpload({ photos, setPhotos }) {
   return (
     <section className="paper-card">
       <div className="section-heading">
-        <h3>Fotodokumentace</h3>
+        <div className="flex items-center gap-3">
+          <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-mint-100 text-mint-700">
+            <Icon name="image" className="size-5" />
+          </span>
+          <h3>Fotodokumentace</h3>
+        </div>
         <label className="file-button no-print">
           Přidat fotografie
           <input className="hidden" type="file" accept="image/*" multiple onChange={handleUpload} />
