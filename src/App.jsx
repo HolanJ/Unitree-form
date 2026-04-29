@@ -1,197 +1,584 @@
-import { useMemo, useState } from "react";
-import Header from "./components/Header.jsx";
-import SummaryBar from "./components/SummaryBar.jsx";
-import SectionCard from "./components/SectionCard.jsx";
-import RobotPicker from "./components/RobotPicker.jsx";
-import Field from "./components/Field.jsx";
-import Checklist from "./components/Checklist.jsx";
-import PhotoUpload from "./components/PhotoUpload.jsx";
-import SignatureBox from "./components/SignatureBox.jsx";
-import Icon from "./components/Icon.jsx";
-import { issueChecklist, returnChecklist, robots } from "./data/checklists.js";
+import React, { useEffect, useRef, useState } from "react";
+import { Camera, CheckCircle2, Cpu, PlusCircle, Printer, Trash2, User, Calendar } from "lucide-react";
 
-const initialForm = {
-  issueDate: new Date().toISOString().slice(0, 10),
+// --- Constants & Config ---
+const ROBOT_LIST = ["Adam", "Božena", "Emil", "Cvrček", "Fík"];
+
+const INITIAL_STATE = {
+  mode: "issue", // 'issue' or 'return'
+  issueDate: new Date().toISOString().split("T")[0],
   borrower: "",
   contactPerson: "",
   purpose: "",
   dateFrom: "",
   dateTo: "",
   handoverPlace: "",
-  owner: "",
+  responsibleOwner: "",
+  selectedRobots: [],
+
+  // Issue Specific
   issueBattery: "",
   serialNumber: "",
   firmware: "",
   issueNote: "",
+  issueChecklist: {
+    physical: [
+      { id: "p1", label: "Robot Unitree G1 – kompletní, bez viditelného poškození", checked: false },
+      { id: "p2", label: "Ovladač (controller) – funkční, čistý, včetně páček", checked: false },
+      { id: "p3", label: "Ovládací telefon – nabitý, přihlášený", checked: false },
+      { id: "p4", label: "Nabíječka robota – včetně kabelu a adaptéru", checked: false },
+      { id: "p5", label: "Baterie – plně nabitá", checked: false },
+      { id: "p6", label: "Přepravní kufr", checked: false }
+    ],
+    condition: [
+      { id: "c1", label: "Všechny klouby se pohybují volně, žádné neobvyklé zvuky", checked: false },
+      { id: "c2", label: "Kamerové systémy a senzory bez prachu a nečistot", checked: false },
+      { id: "c3", label: "Pořízeny fotografie", checked: false }
+    ],
+    software: [
+      { id: "s1", label: "Robot se zapíná bez chybových hlášek", checked: false },
+      { id: "s2", label: "Ovladač a telefon se připojí k\u202Frobotu", checked: false },
+      { id: "s3", label: "Vzdálené ovládání funguje (základní test pohybu)", checked: false },
+      { id: "s4", label: "Wi-Fi / Bluetooth připojení funkční", checked: false }
+    ]
+  },
+
+  // Return Specific
   returnBattery: "",
   runtimeHours: "",
-  returnInspector: "",
+  inspector: "",
   returnNote: "",
+  returnChecklist: {
+    physical: [
+      { id: "rp1", label: "Všechny položky vráceny: robot, ovladač, telefon, baterie, nabíječka", checked: false },
+      { id: "rp2", label: "Nic nechybí ani není poškozené", checked: false },
+      { id: "rp3", label: "Robot čistý, bez nečistot či prachu", checked: false },
+      { id: "rp4", label: "Konektory a porty nepoškozené", checked: false }
+    ],
+    condition: [
+      { id: "rc1", label: "Žádné nové škrábance, praskliny, nebo uvolněné díly (foto)", checked: false },
+      { id: "rc2", label: "Pohyby plynulé, žádné zasekávání kloubů", checked: false },
+      { id: "rc3", label: "Kamery/senzory čisté a funkční", checked: false },
+      { id: "rc4", label: "Robot se vypíná / zapíná normálně", checked: false }
+    ],
+    software: [
+      { id: "rs1", label: "Připojení robota s ovladačem a telefonem funkční", checked: false },
+      { id: "rs2", label: "Žádné chybové hlášky při spuštění", checked: false },
+      { id: "rs3", label: "Baterie nabitá nebo uvedena úroveň při vrácení", checked: false },
+      { id: "rs4", label: "Firmware beze změn (pokud nebyl updatován se souhlasem správce)", checked: false }
+    ]
+  },
+
   generalNote: "",
-  lenderSigner: "",
-  borrowerSigner: ""
+  confirmations: {
+    safety: false,
+    responsibility: false,
+    correctness: false
+  },
+  photos: []
 };
 
-function HeadingIcon({ name }) {
-  return (
-    <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-mint-100 text-mint-700">
-      <Icon name={name} className="size-5" />
-    </span>
-  );
-}
+// --- Sub-Components ---
 
-export default function App() {
-  const [mode, setMode] = useState("issue");
-  const [form, setForm] = useState(initialForm);
-  const [selectedRobots, setSelectedRobots] = useState([robots[0]]);
-  const [checks, setChecks] = useState({ issueChecks: [], returnChecks: [], confirmations: [] });
-  const [photos, setPhotos] = useState([]);
-  const [clearSignal, setClearSignal] = useState(0);
+const SignaturePad = ({ label }) => {
+  const canvasRef = useRef(null);
+  const [isDrawing, setIsDrawing] = useState(false);
 
-  const protocolTitle = form.borrower.trim() ? `Zápůjčka ${form.borrower.trim()}` : "Zápůjčka";
-  const completion = useMemo(() => {
-    const required = ["borrower", "contactPerson", "purpose", "dateFrom", "dateTo", "handoverPlace", "owner"];
-    const filled = required.filter((name) => form[name].trim()).length;
-    return Math.round((filled / required.length) * 100);
-  }, [form]);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    ctx.lineWidth = 2;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.strokeStyle = "#000";
+  }, []);
 
-  const updateField = (name, value) => {
-    setForm((current) => ({ ...current, [name]: value }));
+  const getCoordinates = (e) => {
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const clientX = e.clientX || (e.touches && e.touches[0].clientX);
+    const clientY = e.clientY || (e.touches && e.touches[0].clientY);
+    return {
+      x: clientX - rect.left,
+      y: clientY - rect.top
+    };
   };
 
-  const toggleCheck = (group, value) => {
-    setChecks((current) => {
-      const exists = current[group].includes(value);
-      return {
-        ...current,
-        [group]: exists ? current[group].filter((item) => item !== value) : [...current[group], value]
+  const startDrawing = (e) => {
+    setIsDrawing(true);
+    const coords = getCoordinates(e);
+    const ctx = canvasRef.current.getContext("2d");
+    ctx.beginPath();
+    ctx.moveTo(coords.x, coords.y);
+  };
+
+  const stopDrawing = () => {
+    setIsDrawing(false);
+  };
+
+  const draw = (e) => {
+    if (!isDrawing) return;
+    const coords = getCoordinates(e);
+    const ctx = canvasRef.current.getContext("2d");
+    ctx.lineTo(coords.x, coords.y);
+    ctx.stroke();
+  };
+
+  const clear = () => {
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  };
+
+  return (
+    <div className="flex flex-col items-center flex-1">
+      <span className="text-sm font-medium mb-2 text-slate-600">{label}</span>
+      <div className="border-2 border-dashed border-slate-300 rounded-lg bg-white relative w-full max-w-[350px]">
+        <canvas
+          ref={canvasRef}
+          width={350}
+          height={150}
+          onMouseDown={startDrawing}
+          onMouseMove={draw}
+          onMouseUp={stopDrawing}
+          onMouseOut={stopDrawing}
+          onTouchStart={startDrawing}
+          onTouchMove={draw}
+          onTouchEnd={stopDrawing}
+          className="cursor-crosshair touch-none w-full h-auto"
+        />
+        <button onClick={clear} className="absolute bottom-2 right-2 p-1.5 text-xs text-slate-400 hover:text-red-500 print:hidden">
+          Smazat
+        </button>
+      </div>
+    </div>
+  );
+};
+
+export default function App() {
+  const [data, setData] = useState(INITIAL_STATE);
+
+  const handleReset = () => {
+    if (window.confirm("Opravdu chcete vytvořit nový protokol? Všechna zadaná data budou smazána.")) {
+      setData(INITIAL_STATE);
+      window.scrollTo(0, 0);
+    }
+  };
+
+  const handlePrint = () => {
+    window.print();
+  };
+
+  const updateData = (field, value) => {
+    setData((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const toggleRobot = (robot) => {
+    const current = data.selectedRobots;
+    if (current.includes(robot)) {
+      updateData(
+        "selectedRobots",
+        current.filter((r) => r !== robot)
+      );
+    } else {
+      updateData("selectedRobots", [...current, robot]);
+    }
+  };
+
+  const handlePhotoUpload = (e) => {
+    const files = Array.from(e.target.files);
+    if (data.photos.length + files.length > 12) {
+      alert("Maximální počet fotografií je 12.");
+      return;
+    }
+
+    files.forEach((file) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setData((prev) => ({
+          ...prev,
+          photos: [...prev.photos, reader.result]
+        }));
       };
+      reader.readAsDataURL(file);
     });
   };
 
-  const resetForm = () => {
-    if (!confirm("Opravdu chcete založit nový prázdný protokol?")) return;
-    setMode("issue");
-    setForm({ ...initialForm, issueDate: new Date().toISOString().slice(0, 10) });
-    setSelectedRobots([robots[0]]);
-    setChecks({ issueChecks: [], returnChecks: [], confirmations: [] });
-    setPhotos([]);
-    setClearSignal((value) => value + 1);
+  const removePhoto = (index) => {
+    setData((prev) => ({
+      ...prev,
+      photos: prev.photos.filter((_, i) => i !== index)
+    }));
+  };
+
+  const toggleCheck = (section, index, modeType) => {
+    const key = modeType === "issue" ? "issueChecklist" : "returnChecklist";
+    const newList = [...data[key][section]];
+    newList[index].checked = !newList[index].checked;
+    setData((prev) => ({
+      ...prev,
+      [key]: { ...prev[key], [section]: newList }
+    }));
   };
 
   return (
-    <>
-      <Header mode={mode} setMode={setMode} onPrint={() => window.print()} onReset={resetForm} />
+    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans pb-20 print:bg-white print:p-0">
+      {/* Sticky Header */}
+      <header className="sticky top-0 z-50 bg-white/90 backdrop-blur-md border-b border-slate-200 px-4 py-3 shadow-sm print:hidden">
+        <div className="max-w-5xl mx-auto flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="bg-slate-900 text-white p-2 rounded-lg">
+              <Cpu size={24} />
+            </div>
+            <div>
+              <h1 className="font-bold text-lg leading-tight">Předávací protokol</h1>
+              <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Unitree Fleet Management</p>
+            </div>
+          </div>
 
-      <main className="mx-auto grid max-w-6xl gap-4 px-4 py-5 md:px-7">
-        <SummaryBar robotCount={selectedRobots.length} mode={mode} photoCount={photos.length} completion={completion} />
+          <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-xl">
+            <button
+              onClick={() => updateData("mode", "issue")}
+              className={`px-5 py-1.5 rounded-lg text-sm font-semibold transition-all ${
+                data.mode === "issue" ? "bg-white shadow-sm text-blue-600" : "text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              Vydání
+            </button>
+            <button
+              onClick={() => updateData("mode", "return")}
+              className={`px-5 py-1.5 rounded-lg text-sm font-semibold transition-all ${
+                data.mode === "return" ? "bg-white shadow-sm text-orange-600" : "text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              Vrácení
+            </button>
+          </div>
 
-        <form className="grid gap-4">
-          <SectionCard accent className="grid gap-5 md:grid-cols-[minmax(0,1fr)_280px]">
-            <div className="flex items-start gap-4">
-              <HeadingIcon name="file" />
-              <div>
-                <p className="text-xs font-extrabold uppercase tracking-wider text-mint-700">Předávací protokol</p>
-                <h2 className="mt-1 text-3xl font-black leading-tight text-ink md:text-4xl">{protocolTitle}</h2>
-                <p className="mt-2 text-sm text-slate-600">Roboti Unitree: {selectedRobots.join(", ")}</p>
-              </div>
-            </div>
-            <Field label="Datum vystavení" name="issueDate" type="date" value={form.issueDate} onChange={updateField} />
-          </SectionCard>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleReset}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+            >
+              <PlusCircle size={18} />
+              <span className="hidden sm:inline">Nový</span>
+            </button>
+            <button
+              onClick={handlePrint}
+              className={`flex items-center gap-2 px-5 py-2 text-sm font-bold text-white rounded-lg shadow-lg transition-all active:scale-95 ${
+                data.mode === "issue" ? "bg-blue-600 hover:bg-blue-700" : "bg-orange-600 hover:bg-orange-700"
+              }`}
+            >
+              <Printer size={18} />
+              <span>PDF / Tisk</span>
+            </button>
+          </div>
+        </div>
+      </header>
 
-          <SectionCard>
-            <div className="section-heading">
-              <div className="flex items-center gap-3">
-                <HeadingIcon name="clipboard" />
-                <h3>Údaje o výpůjčce</h3>
-              </div>
+      {/* Protocol Canvas */}
+      <main className="max-w-4xl mx-auto mt-8 mb-12 bg-white shadow-2xl border border-slate-200 rounded-2xl overflow-hidden print:shadow-none print:border-0 print:mt-0 print:max-w-full">
+        {/* Dynamic Header for Printing */}
+        <div className="hidden print:flex justify-between items-start border-b-4 border-slate-900 pb-6 p-10">
+          <div>
+            <h1 className="text-4xl font-black uppercase tracking-tighter mb-1">Protokol o předání</h1>
+            <p className="text-xl font-bold text-slate-600">
+              {data.mode === "issue" ? "REŽIM: VYDÁNÍ DO VÝPŮJČKY" : "REŽIM: VRÁCENÍ Z VÝPŮJČKY"}
+            </p>
+            <div className="mt-6 flex flex-wrap gap-2">
+              {data.selectedRobots.map((r) => (
+                <span key={r} className="bg-slate-900 text-white px-4 py-1.5 rounded-md font-mono text-sm font-bold">
+                  ROBOT: {r}
+                </span>
+              ))}
             </div>
-            <div className="grid gap-4 md:grid-cols-2">
-              <RobotPicker selectedRobots={selectedRobots} setSelectedRobots={setSelectedRobots} />
-              <Field label="Vypůjčitel / organizace" name="borrower" value={form.borrower} placeholder="Jméno organizace nebo osoby" onChange={updateField} />
-              <Field label="Kontaktní osoba" name="contactPerson" value={form.contactPerson} placeholder="Jméno, telefon, e-mail" onChange={updateField} />
-              <Field label="Účel výpůjčky" name="purpose" value={form.purpose} placeholder="Demo, testování, školení..." onChange={updateField} />
-              <Field label="Termín od" name="dateFrom" type="date" value={form.dateFrom} onChange={updateField} />
-              <Field label="Termín do" name="dateTo" type="date" value={form.dateTo} onChange={updateField} />
-              <Field label="Místo předání" name="handoverPlace" value={form.handoverPlace} placeholder="Adresa / místnost" onChange={updateField} />
-              <Field label="Odpovědná osoba" name="owner" value={form.owner} placeholder="Interní garant" onChange={updateField} />
-            </div>
-          </SectionCard>
+          </div>
+          <div className="text-right">
+            <div className="text-2xl font-black mb-1">Unitree Hub</div>
+            <p className="text-sm font-medium text-slate-500 uppercase tracking-widest">
+              Protocol ID: {new Date().getTime().toString(36).toUpperCase()}
+            </p>
+            <p className="text-sm font-medium text-slate-500">Datum: {data.issueDate}</p>
+          </div>
+        </div>
 
-          <SectionCard className={mode === "issue" ? "" : "edit-hidden"} data-section="issue">
-            <div className="section-heading">
-              <div className="flex items-start gap-3">
-                <HeadingIcon name="shield" />
-                <div>
-                <h3>Vydání robota před půjčením</h3>
-                <p>Kontrola stavu, příslušenství a provozní připravenosti.</p>
-                </div>
-              </div>
+        <div className="p-8 md:p-12 space-y-12">
+          {/* Section: Robot Selector (UI only) */}
+          <section className="print:hidden">
+            <label className="block text-xs font-black text-slate-400 mb-3 uppercase tracking-[0.2em]">Výběr zařízení k protokolu</label>
+            <div className="flex flex-wrap gap-3">
+              {ROBOT_LIST.map((robot) => (
+                <button
+                  key={robot}
+                  onClick={() => toggleRobot(robot)}
+                  className={`px-6 py-2.5 rounded-xl border-2 transition-all font-bold text-sm ${
+                    data.selectedRobots.includes(robot)
+                      ? "bg-slate-900 border-slate-900 text-white shadow-lg scale-105"
+                      : "bg-white border-slate-200 text-slate-400 hover:border-slate-300"
+                  }`}
+                >
+                  {robot}
+                </button>
+              ))}
             </div>
-            <div className="grid gap-4">
-              <div className="grid gap-4 md:grid-cols-2">
-                <Field label="Stav baterie při vydání" name="issueBattery" value={form.issueBattery} placeholder="např. 100 %" onChange={updateField} />
-                <Field label="Sériové číslo robota" name="serialNumber" value={form.serialNumber} placeholder="SN / inventární číslo" onChange={updateField} />
-                <Field label="Verze firmware" name="firmware" value={form.firmware} placeholder="volitelné" onChange={updateField} />
-              </div>
-              <Checklist groups={issueChecklist} name="issueChecks" values={checks.issueChecks} onToggle={toggleCheck} />
-              <Field label="Poznámka k vydání" name="issueNote" value={form.issueNote} placeholder="Popis stavu, chybějící příslušenství, omezení provozu..." as="textarea" onChange={updateField} />
-            </div>
-          </SectionCard>
+          </section>
 
-          <SectionCard className={mode === "return" ? "" : "edit-hidden"} data-section="return">
-            <div className="section-heading">
-              <div className="flex items-start gap-3">
-                <HeadingIcon name="rotate" />
-                <div>
-                <h3>Vrácení robota po výpůjčce</h3>
-                <p>Vyplňuje se při převzetí robota zpět.</p>
-                </div>
-              </div>
-            </div>
-            <div className="grid gap-4">
-              <div className="grid gap-4 md:grid-cols-2">
-                <Field label="Stav baterie při vrácení" name="returnBattery" value={form.returnBattery} placeholder="např. 38 %" onChange={updateField} />
-                <Field label="Počet provozních hodin" name="runtimeHours" value={form.runtimeHours} placeholder="volitelné" onChange={updateField} />
-                <Field label="Kontrolu provedl" name="returnInspector" value={form.returnInspector} placeholder="Jméno a příjmení" onChange={updateField} />
-              </div>
-              <Checklist groups={returnChecklist} name="returnChecks" values={checks.returnChecks} onToggle={toggleCheck} />
-              <Field label="Poznámka k vrácení" name="returnNote" value={form.returnNote} placeholder="Popis závad, opotřebení, rozdíly oproti vydání..." as="textarea" onChange={updateField} />
-            </div>
-          </SectionCard>
-
-          <PhotoUpload photos={photos} setPhotos={setPhotos} />
-
-          <SectionCard>
-            <div className="section-heading">
-              <div className="flex items-center gap-3">
-                <HeadingIcon name="signature" />
-                <h3>Poznámky a potvrzení</h3>
-              </div>
-            </div>
-            <Field label="Obecné poznámky" name="generalNote" value={form.generalNote} placeholder="Další ujednání, upozornění, odpovědnost za škody, servisní stav..." as="textarea" rows={5} onChange={updateField} />
-            <div className="mt-4 rounded-lg border border-mint-200 bg-mint-50/80 p-4">
-              <div className="grid gap-3 md:grid-cols-2">
-                {[
-                  "Vypůjčitel byl seznámen s bezpečnostními pokyny",
-                  "Vypůjčitel přebírá odpovědnost za robota a příslušenství",
-                  "Obě strany potvrzují správnost uvedených údajů"
-                ].map((item) => (
-                  <label key={item} className="grid grid-cols-[18px_1fr] items-start gap-2 text-sm font-medium text-slate-700">
-                    <input className="mt-0.5 size-[18px] accent-mint-700" type="checkbox" checked={checks.confirmations.includes(item)} onChange={() => toggleCheck("confirmations", item)} />
-                    <span>{item}</span>
+          {/* Section: Identification */}
+          <section className="grid grid-cols-1 md:grid-cols-2 gap-10">
+            <div className="space-y-6">
+              <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest flex items-center gap-2 pb-2 border-b border-slate-100">
+                <User size={16} className="text-blue-500" /> Smluvní strany
+              </h3>
+              <div className="space-y-4">
+                <div className="group">
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1 transition-colors group-focus-within:text-blue-500">
+                    Vypůjčitel (Firma/Subjekt)
                   </label>
+                  <input
+                    type="text"
+                    value={data.borrower}
+                    onChange={(e) => updateData("borrower", e.target.value)}
+                    placeholder="Např. Robotické Centrum s.r.o."
+                    className="w-full px-0 py-2 bg-transparent border-b border-slate-200 focus:border-blue-500 outline-none font-medium transition-all"
+                  />
+                </div>
+                <div className="group">
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1 transition-colors group-focus-within:text-blue-500">
+                    Kontaktní osoba
+                  </label>
+                  <input
+                    type="text"
+                    value={data.contactPerson}
+                    onChange={(e) => updateData("contactPerson", e.target.value)}
+                    className="w-full px-0 py-2 bg-transparent border-b border-slate-200 focus:border-blue-500 outline-none font-medium transition-all"
+                  />
+                </div>
+                <div className="group">
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1 transition-colors group-focus-within:text-blue-500">
+                    Předávající (za zapůjčitele)
+                  </label>
+                  <input
+                    type="text"
+                    value={data.responsibleOwner}
+                    onChange={(e) => updateData("responsibleOwner", e.target.value)}
+                    className="w-full px-0 py-2 bg-transparent border-b border-slate-200 focus:border-blue-500 outline-none font-medium transition-all"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-6">
+              <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest flex items-center gap-2 pb-2 border-b border-slate-100">
+                <Calendar size={16} className="text-blue-500" /> Podrobnosti výpůjčky
+              </h3>
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="group">
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Datum od</label>
+                    <input
+                      type="date"
+                      value={data.dateFrom}
+                      onChange={(e) => updateData("dateFrom", e.target.value)}
+                      className="w-full px-0 py-2 bg-transparent border-b border-slate-200 focus:border-blue-500 outline-none font-medium"
+                    />
+                  </div>
+                  <div className="group">
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Datum do (předpoklad)</label>
+                    <input
+                      type="date"
+                      value={data.dateTo}
+                      onChange={(e) => updateData("dateTo", e.target.value)}
+                      className="w-full px-0 py-2 bg-transparent border-b border-slate-200 focus:border-blue-500 outline-none font-medium"
+                    />
+                  </div>
+                </div>
+                <div className="group">
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Lokalita / Místo předání</label>
+                  <input
+                    type="text"
+                    value={data.handoverPlace}
+                    onChange={(e) => updateData("handoverPlace", e.target.value)}
+                    className="w-full px-0 py-2 bg-transparent border-b border-slate-200 focus:border-blue-500 outline-none font-medium transition-all"
+                  />
+                </div>
+                <div className="group">
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Účel využití</label>
+                  <input
+                    type="text"
+                    value={data.purpose}
+                    onChange={(e) => updateData("purpose", e.target.value)}
+                    className="w-full px-0 py-2 bg-transparent border-b border-slate-200 focus:border-blue-500 outline-none font-medium transition-all"
+                  />
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* Mode-Specific: ISSUE SECTION */}
+          {data.mode === "issue" && (
+            <section className="animate-in fade-in slide-in-from-top-4 duration-500 space-y-8">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                <div className="space-y-6">
+                  <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest border-l-4 border-blue-500 pl-3">
+                    Kontrolní body (Vydání)
+                  </h4>
+                  {Object.entries(data.issueChecklist).map(([key, items]) => (
+                    <div key={key} className="space-y-2">
+                      <span className="text-[9px] font-black text-slate-300 uppercase block mb-2">
+                        {key === "physical" ? "Fyzické vybavení" : key === "condition" ? "Stav robota" : "Elektronika a software"}
+                      </span>
+                      {items.map((item, idx) => (
+                        <label
+                          key={item.id}
+                          className="flex items-center gap-3 py-1.5 cursor-pointer group hover:bg-slate-50 rounded-lg px-2 transition-colors"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={item.checked}
+                            onChange={() => toggleCheck(key, idx, "issue")}
+                            className="w-5 h-5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <span className="text-sm font-medium text-slate-600 group-hover:text-slate-900">{item.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+                <div className="space-y-4">
+                  <label className="block text-xs font-black text-slate-900 uppercase tracking-widest border-l-4 border-blue-500 pl-3">
+                    Doplňující poznámky
+                  </label>
+                  <textarea
+                    rows={10}
+                    value={data.issueNote}
+                    onChange={(e) => updateData("issueNote", e.target.value)}
+                    placeholder="Popište stav zařízení, případné vady nebo specifika..."
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none resize-none text-sm font-medium leading-relaxed"
+                  />
+                </div>
+              </div>
+            </section>
+          )}
+
+          {/* Mode-Specific: RETURN SECTION */}
+          {data.mode === "return" && (
+            <section className="animate-in fade-in slide-in-from-top-4 duration-500 space-y-8">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                <div className="space-y-6">
+                  <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest border-l-4 border-orange-500 pl-3">
+                    Kontrolní body (Vrácení)
+                  </h4>
+                  {Object.entries(data.returnChecklist).map(([key, items]) => (
+                    <div key={key} className="space-y-2">
+                      <span className="text-[9px] font-black text-slate-300 uppercase block mb-2">
+                        {key === "physical" ? "Fyzické vybavení" : key === "condition" ? "Stav robota" : "Elektronika a software"}
+                      </span>
+                      {items.map((item, idx) => (
+                        <label
+                          key={item.id}
+                          className="flex items-center gap-3 py-1.5 cursor-pointer group hover:bg-slate-50 rounded-lg px-2 transition-colors"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={item.checked}
+                            onChange={() => toggleCheck(key, idx, "return")}
+                            className="w-5 h-5 rounded border-slate-300 text-orange-600 focus:ring-orange-500"
+                          />
+                          <span className="text-sm font-medium text-slate-600 group-hover:text-slate-900">{item.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+                <div className="space-y-4">
+                  <label className="block text-xs font-black text-slate-900 uppercase tracking-widest border-l-4 border-orange-500 pl-3">
+                    Nález při převzetí
+                  </label>
+                  <textarea
+                    rows={10}
+                    value={data.returnNote}
+                    onChange={(e) => updateData("returnNote", e.target.value)}
+                    placeholder="Popište stav po ukončení výpůjčky, zjištěné závady nebo chybějící položky..."
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-orange-500 outline-none resize-none text-sm font-medium leading-relaxed"
+                  />
+                </div>
+              </div>
+            </section>
+          )}
+
+          {/* Section: Photos */}
+          <section className="space-y-6">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest flex items-center gap-2">
+                <Camera size={16} className="text-blue-500" /> Fotodokumentace ({data.photos.length}/12)
+              </h3>
+              <label className="cursor-pointer bg-slate-900 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-slate-800 transition-all active:scale-95 print:hidden">
+                <input type="file" multiple accept="image/*" onChange={handlePhotoUpload} className="hidden" />
+                Nahrát fotografie
+              </label>
+            </div>
+
+            {data.photos.length === 0 ? (
+              <div className="py-12 border-2 border-dashed border-slate-100 rounded-2xl flex flex-col items-center justify-center text-slate-300 print:hidden">
+                <Camera size={40} strokeWidth={1} />
+                <p className="text-sm font-medium mt-3">Nahrajte aktuální fotky robota pro archivaci</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 print:grid-cols-3">
+                {data.photos.map((photo, i) => (
+                  <div key={i} className="relative aspect-[4/3] rounded-xl overflow-hidden border border-slate-200 bg-slate-50 shadow-sm group">
+                    <img src={photo} alt="Doc" className="w-full h-full object-cover" />
+                    <button
+                      onClick={() => removePhoto(i)}
+                      className="absolute top-2 right-2 p-1.5 bg-red-600 text-white rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-all hover:bg-red-700 print:hidden"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
                 ))}
               </div>
-            </div>
+            )}
+          </section>
 
-            <div className="mt-4 grid gap-4 md:grid-cols-2">
-              <SignatureBox title="Za zapůjčitele" signerName={form.lenderSigner} signerField="lenderSigner" onFieldChange={updateField} clearSignal={clearSignal} />
-              <SignatureBox title="Za vypůjčitele" signerName={form.borrowerSigner} signerField="borrowerSigner" onFieldChange={updateField} clearSignal={clearSignal} />
+          {/* Section: Consents */}
+          <section className="bg-slate-900 text-white p-8 rounded-3xl space-y-6 print:bg-white print:text-slate-900 print:p-0 print:border-t-2 print:border-slate-900 print:rounded-none print:pt-6">
+            <h3 className="text-xs font-black uppercase tracking-widest flex items-center gap-2 text-blue-400 print:text-slate-900">
+              <CheckCircle2 size={16} /> Čestné prohlášení
+            </h3>
+
+            <div className="space-y-4">
+              {Object.entries({
+                safety: "Vypůjčitel stvrzuje, že byl proškolen v ovládání zařízení a seznámen s bezpečnostními riziky.",
+                responsibility: "Vypůjčitel bere na vědomí odpovědnost za případné škody způsobené neodborným zacházením.",
+                correctness: "Smluvní strany prohlašují, že údaje v protokolu odpovídají skutečnému stavu věci."
+              }).map(([key, label]) => (
+                <label key={key} className="flex items-start gap-4 cursor-pointer group">
+                  <input
+                    type="checkbox"
+                    checked={data.confirmations[key]}
+                    onChange={(e) => setData({ ...data, confirmations: { ...data.confirmations, [key]: e.target.checked } })}
+                    className="mt-1 w-5 h-5 rounded border-white/20 bg-white/10 text-blue-500 focus:ring-offset-slate-900 print:border-slate-300"
+                  />
+                  <span className="text-sm font-medium opacity-80 group-hover:opacity-100 transition-opacity leading-snug">{label}</span>
+                </label>
+              ))}
             </div>
-          </SectionCard>
-        </form>
+          </section>
+
+          {/* Section: Signatures */}
+          <section className="pt-6">
+            <div className="flex flex-col md:flex-row gap-12 justify-center items-center">
+              <SignaturePad label="Za zapůjčitele (Podpis)" />
+              <SignaturePad label="Za vypůjčitele (Podpis)" />
+            </div>
+          </section>
+        </div>
+
+        {/* Legal Footer for PDF */}
+        <div className="hidden print:block p-10 border-t border-slate-100 bg-slate-50 mt-12 text-[9px] text-slate-400 leading-relaxed italic">
+          Protokol je vyhotoven ve dvou stejnopisech, z nichž každá strana obdrží jeden. Dokument slouží jako důkaz o stavu zařízení v době předání/převzetí. Jakékoli závady zjištěné po podpisu, které nejsou v tomto dokumentu uvedeny, jdou k tíži vypůjčitele.
+        </div>
       </main>
-    </>
+    </div>
   );
 }
