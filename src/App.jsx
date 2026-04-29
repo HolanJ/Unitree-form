@@ -566,7 +566,7 @@ export default function App() {
                     type="text"
                     value={data.borrower}
                     onChange={(e) => updateData("borrower", e.target.value)}
-                    placeholder="Např. Robotické Centrum s.r.o."
+                    placeholder="ČVUT v Praze"
                     className="w-full px-0 py-2 bg-transparent border-b border-slate-200 focus:border-blue-500 outline-none font-medium transition-all"
                   />
                 </div>
