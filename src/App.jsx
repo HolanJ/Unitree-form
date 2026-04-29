@@ -155,6 +155,216 @@ const SignaturePad = ({ label }) => {
   );
 };
 
+const pad2 = (n) => String(n).padStart(2, "0");
+
+const formatISODate = (d) => {
+  if (!(d instanceof Date) || Number.isNaN(d.getTime())) return "";
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+};
+
+const parseISODate = (value) => {
+  if (!value) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value));
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]) - 1;
+  const d = Number(m[3]);
+  const dt = new Date(y, mo, d);
+  if (dt.getFullYear() !== y || dt.getMonth() !== mo || dt.getDate() !== d) return null;
+  return dt;
+};
+
+const startOfMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
+const addMonths = (d, delta) => new Date(d.getFullYear(), d.getMonth() + delta, 1);
+const isSameDay = (a, b) =>
+  a && b && a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+
+const getMonthLabel = (d) =>
+  d.toLocaleDateString("cs-CZ", {
+    month: "long",
+    year: "numeric"
+  });
+
+const DatePickerPopover = ({ label, value, onChange, tone = "blue", placeholder = "Vyberte datum" }) => {
+  const [open, setOpen] = useState(false);
+  const anchorRef = useRef(null);
+  const popoverRef = useRef(null);
+
+  const selectedDate = parseISODate(value);
+  const [viewMonth, setViewMonth] = useState(() => startOfMonth(selectedDate || new Date()));
+
+  useEffect(() => {
+    if (!open) return;
+    setViewMonth(startOfMonth(selectedDate || new Date()));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const onPointerDown = (e) => {
+      const a = anchorRef.current;
+      const p = popoverRef.current;
+      if (!a || !p) return;
+      if (a.contains(e.target) || p.contains(e.target)) return;
+      setOpen(false);
+    };
+
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+
+    window.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  const first = startOfMonth(viewMonth);
+  const month = first.getMonth();
+  const year = first.getFullYear();
+  const today = new Date();
+
+  // Monday-first calendar. Convert JS day (Sun=0) to Monday index (Mon=0..Sun=6)
+  const weekdayIndex = (jsDay) => (jsDay + 6) % 7;
+  const gridStart = new Date(year, month, 1 - weekdayIndex(first.getDay()));
+
+  const days = Array.from({ length: 42 }, (_, i) => {
+    const d = new Date(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate() + i);
+    const inMonth = d.getMonth() === month && d.getFullYear() === year;
+    return { d, inMonth };
+  });
+
+  const ring = tone === "orange" ? "focus:ring-orange-500" : "focus:ring-blue-500";
+  const activeBg = tone === "orange" ? "bg-orange-600 hover:bg-orange-700" : "bg-blue-600 hover:bg-blue-700";
+  const activeText = tone === "orange" ? "text-orange-600" : "text-blue-600";
+
+  const setDate = (d) => {
+    onChange?.(formatISODate(d));
+    setOpen(false);
+  };
+
+  const clear = () => {
+    onChange?.("");
+    setOpen(false);
+  };
+
+  return (
+    <div className="group">
+      {label ? <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">{label}</label> : null}
+
+      <div ref={anchorRef} className="relative">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className={`w-full flex items-center justify-between gap-3 px-0 py-2 bg-transparent border-b border-slate-200 outline-none font-medium transition-all ${ring}`}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+        >
+          <span className={value ? "text-slate-900" : "text-slate-400"}>{value || placeholder}</span>
+          <Calendar size={16} className={value ? activeText : "text-slate-400"} />
+        </button>
+
+        {open ? (
+          <div
+            ref={popoverRef}
+            role="dialog"
+            className="absolute z-50 mt-2 w-[320px] rounded-2xl border border-slate-200 bg-white shadow-2xl p-4"
+          >
+            <div className="flex items-center justify-between gap-2 mb-3">
+              <button
+                type="button"
+                onClick={() => setViewMonth((m) => addMonths(m, -1))}
+                className="px-3 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold"
+                aria-label="Předchozí měsíc"
+              >
+                ←
+              </button>
+              <div className="text-sm font-black text-slate-900 capitalize">{getMonthLabel(first)}</div>
+              <button
+                type="button"
+                onClick={() => setViewMonth((m) => addMonths(m, 1))}
+                className="px-3 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold"
+                aria-label="Další měsíc"
+              >
+                →
+              </button>
+            </div>
+
+            <div className="grid grid-cols-7 gap-1 text-[10px] font-black text-slate-400 uppercase mb-1">
+              {["Po", "Út", "St", "Čt", "Pá", "So", "Ne"].map((w) => (
+                <div key={w} className="text-center py-1">
+                  {w}
+                </div>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-7 gap-1">
+              {days.map(({ d, inMonth }) => {
+                const selected = isSameDay(d, selectedDate);
+                const isToday = isSameDay(d, today);
+                const disabled = !inMonth;
+
+                const base =
+                  "h-9 rounded-xl text-sm font-bold transition-all focus:outline-none focus:ring-2 focus:ring-offset-2";
+                const disabledCls = "text-slate-300 cursor-not-allowed";
+                const selectedCls = `text-white ${activeBg} shadow-sm`;
+                const todayCls = "border border-slate-300";
+                const normalCls = "text-slate-700 hover:bg-slate-100";
+
+                return (
+                  <button
+                    key={formatISODate(d)}
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => setDate(d)}
+                    className={[
+                      base,
+                      disabled ? disabledCls : normalCls,
+                      isToday && !selected ? todayCls : "",
+                      selected ? selectedCls : ""
+                    ].join(" ")}
+                  >
+                    {d.getDate()}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mt-3 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => setDate(new Date())}
+                className="px-3 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-black"
+              >
+                Dnes
+              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={clear}
+                  className="px-3 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-black"
+                >
+                  Smazat
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  className={`px-4 py-2 rounded-xl text-white text-xs font-black ${activeBg}`}
+                >
+                  Zavřít
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+};
+
 export default function App() {
   const [data, setData] = useState(INITIAL_STATE);
 
@@ -373,24 +583,20 @@ export default function App() {
               </h3>
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="group">
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Datum od</label>
-                    <input
-                      type="date"
-                      value={data.dateFrom}
-                      onChange={(e) => updateData("dateFrom", e.target.value)}
-                      className="w-full px-0 py-2 bg-transparent border-b border-slate-200 focus:border-blue-500 outline-none font-medium"
-                    />
-                  </div>
-                  <div className="group">
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Datum do (předpoklad)</label>
-                    <input
-                      type="date"
-                      value={data.dateTo}
-                      onChange={(e) => updateData("dateTo", e.target.value)}
-                      className="w-full px-0 py-2 bg-transparent border-b border-slate-200 focus:border-blue-500 outline-none font-medium"
-                    />
-                  </div>
+                  <DatePickerPopover
+                    label="Datum od"
+                    value={data.dateFrom}
+                    onChange={(v) => updateData("dateFrom", v)}
+                    tone="blue"
+                    placeholder="YYYY-MM-DD"
+                  />
+                  <DatePickerPopover
+                    label="Datum do (předpoklad)"
+                    value={data.dateTo}
+                    onChange={(v) => updateData("dateTo", v)}
+                    tone="blue"
+                    placeholder="YYYY-MM-DD"
+                  />
                 </div>
                 <div className="group">
                   <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Lokalita / Místo předání</label>
