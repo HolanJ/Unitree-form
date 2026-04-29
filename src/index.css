@@ -36,6 +36,18 @@
   input::placeholder {
     color: transparent !important;
   }
+  textarea::placeholder {
+    color: transparent !important;
+  }
+
+  .print-avoid-break {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  .print-nowrap {
+    white-space: nowrap !important;
+  }
 
   .bg-slate-900 {
     background-color: transparent !important;
@@ -44,6 +56,18 @@
 
   .text-blue-400 {
     color: black !important;
+  }
+
+  /* Improve print contrast for subtle UI labels */
+  .text-slate-300,
+  .text-slate-400 {
+    color: #334155 !important; /* slate-700-ish */
+  }
+  .text-slate-500 {
+    color: #475569 !important; /* slate-600-ish */
+  }
+  .text-blue-500 {
+    color: #0f172a !important; /* slate-900-ish */
   }
 
   .animate-in {

@@ -80,7 +80,7 @@ const INITIAL_STATE = {
 
 // --- Sub-Components ---
 
-const SignaturePad = ({ label }) => {
+const SignaturePad = ({ label, printName, printDate }) => {
   const canvasRef = useRef(null);
   const [isDrawing, setIsDrawing] = useState(false);
 
@@ -151,6 +151,12 @@ const SignaturePad = ({ label }) => {
           Smazat
         </button>
       </div>
+      <div className="hidden print:block w-full max-w-[350px] mt-2 text-[10px] text-slate-500">
+        <div className="flex justify-between gap-4">
+          <span className="truncate">Jméno: {printName || "—"}</span>
+          <span className="whitespace-nowrap">Datum: {printDate || "—"}</span>
+        </div>
+      </div>
     </div>
   );
 };
@@ -185,7 +191,15 @@ const getMonthLabel = (d) =>
     year: "numeric"
   });
 
-const DatePickerPopover = ({ label, value, onChange, tone = "blue", placeholder = "Vyberte datum" }) => {
+const DatePickerPopover = ({
+  label,
+  value,
+  onChange,
+  tone = "blue",
+  placeholder = "Vyberte datum",
+  align = "left",
+  labelClassName = ""
+}) => {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef(null);
   const popoverRef = useRef(null);
@@ -206,6 +220,8 @@ const DatePickerPopover = ({ label, value, onChange, tone = "blue", placeholder 
       const a = anchorRef.current;
       const p = popoverRef.current;
       if (!a || !p) return;
+      const path = typeof e.composedPath === "function" ? e.composedPath() : [];
+      if (path.includes(a) || path.includes(p)) return;
       if (a.contains(e.target) || p.contains(e.target)) return;
       setOpen(false);
     };
@@ -253,13 +269,17 @@ const DatePickerPopover = ({ label, value, onChange, tone = "blue", placeholder 
 
   return (
     <div className="group">
-      {label ? <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">{label}</label> : null}
+      {label ? (
+        <label className={["block text-[10px] font-bold text-slate-400 uppercase mb-1", labelClassName].join(" ")}>
+          {label}
+        </label>
+      ) : null}
 
       <div ref={anchorRef} className="relative">
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className={`w-full flex items-center justify-between gap-3 px-0 py-2 bg-transparent border-b border-slate-200 outline-none font-medium transition-all ${ring}`}
+          className={`w-full flex items-center justify-between gap-3 px-0 py-2 bg-transparent border-b border-slate-200 outline-none font-medium transition-all print:hidden ${ring}`}
           aria-haspopup="dialog"
           aria-expanded={open}
         >
@@ -267,11 +287,19 @@ const DatePickerPopover = ({ label, value, onChange, tone = "blue", placeholder 
           <Calendar size={16} className={value ? activeText : "text-slate-400"} />
         </button>
 
+        <div className="hidden print:block w-full px-0 py-2 border-b border-slate-200 font-medium text-slate-900">
+          {value || "—"}
+        </div>
+
         {open ? (
           <div
             ref={popoverRef}
             role="dialog"
-            className="absolute z-50 mt-2 w-[320px] rounded-2xl border border-slate-200 bg-white shadow-2xl p-4"
+            className={[
+              "absolute z-50 mt-2 rounded-2xl border border-slate-200 bg-white shadow-2xl p-4",
+              "w-[calc(100vw-2rem)] max-w-[320px]",
+              align === "right" ? "right-0" : "left-0"
+            ].join(" ")}
           >
             <div className="flex items-center justify-between gap-2 mb-3">
               <button
@@ -492,9 +520,6 @@ export default function App() {
         <div className="hidden print:flex justify-between items-start border-b-4 border-slate-900 pb-6 p-10">
           <div>
             <h1 className="text-4xl font-black uppercase tracking-tighter mb-1">Protokol o předání</h1>
-            <p className="text-xl font-bold text-slate-600">
-              {data.mode === "issue" ? "REŽIM: VYDÁNÍ DO VÝPŮJČKY" : "REŽIM: VRÁCENÍ Z VÝPŮJČKY"}
-            </p>
             <div className="mt-6 flex flex-wrap gap-2">
               {data.selectedRobots.map((r) => (
                 <span key={r} className="bg-slate-900 text-white px-4 py-1.5 rounded-md font-mono text-sm font-bold">
@@ -502,13 +527,6 @@ export default function App() {
                 </span>
               ))}
             </div>
-          </div>
-          <div className="text-right">
-            <div className="text-2xl font-black mb-1">Unitree Hub</div>
-            <p className="text-sm font-medium text-slate-500 uppercase tracking-widest">
-              Protocol ID: {new Date().getTime().toString(36).toUpperCase()}
-            </p>
-            <p className="text-sm font-medium text-slate-500">Datum: {data.issueDate}</p>
           </div>
         </div>
 
@@ -589,6 +607,7 @@ export default function App() {
                     onChange={(v) => updateData("dateFrom", v)}
                     tone="blue"
                     placeholder="YYYY-MM-DD"
+                    align="left"
                   />
                   <DatePickerPopover
                     label="Datum do (předpoklad)"
@@ -596,6 +615,8 @@ export default function App() {
                     onChange={(v) => updateData("dateTo", v)}
                     tone="blue"
                     placeholder="YYYY-MM-DD"
+                    align="right"
+                    labelClassName="print-nowrap"
                   />
                 </div>
                 <div className="group">
@@ -629,7 +650,7 @@ export default function App() {
                     Kontrolní body (Vydání)
                   </h4>
                   {Object.entries(data.issueChecklist).map(([key, items]) => (
-                    <div key={key} className="space-y-2">
+                    <div key={key} className="space-y-2 print-avoid-break">
                       <span className="text-[9px] font-black text-slate-300 uppercase block mb-2">
                         {key === "physical" ? "Fyzické vybavení" : key === "condition" ? "Stav robota" : "Elektronika a software"}
                       </span>
@@ -675,7 +696,7 @@ export default function App() {
                     Kontrolní body (Vrácení)
                   </h4>
                   {Object.entries(data.returnChecklist).map(([key, items]) => (
-                    <div key={key} className="space-y-2">
+                    <div key={key} className="space-y-2 print-avoid-break">
                       <span className="text-[9px] font-black text-slate-300 uppercase block mb-2">
                         {key === "physical" ? "Fyzické vybavení" : key === "condition" ? "Stav robota" : "Elektronika a software"}
                       </span>
@@ -713,7 +734,7 @@ export default function App() {
           )}
 
           {/* Section: Photos */}
-          <section className="space-y-6">
+          <section className={`space-y-6 ${data.photos.length === 0 ? "print:hidden" : ""}`}>
             <div className="flex items-center justify-between border-b border-slate-100 pb-2">
               <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest flex items-center gap-2">
                 <Camera size={16} className="text-blue-500" /> Fotodokumentace ({data.photos.length}/12)
@@ -747,7 +768,7 @@ export default function App() {
           </section>
 
           {/* Section: Consents */}
-          <section className="bg-slate-900 text-white p-8 rounded-3xl space-y-6 print:bg-white print:text-slate-900 print:p-0 print:border-t-2 print:border-slate-900 print:rounded-none print:pt-6">
+          <section className="bg-slate-900 text-white p-8 rounded-3xl space-y-6 print:bg-white print:text-slate-900 print:p-0 print:border-t-2 print:border-slate-900 print:rounded-none print:pt-6 print-avoid-break">
             <h3 className="text-xs font-black uppercase tracking-widest flex items-center gap-2 text-blue-400 print:text-slate-900">
               <CheckCircle2 size={16} /> Čestné prohlášení
             </h3>
@@ -772,10 +793,14 @@ export default function App() {
           </section>
 
           {/* Section: Signatures */}
-          <section className="pt-6">
+          <section className="pt-6 print-avoid-break">
             <div className="flex flex-col md:flex-row gap-12 justify-center items-center">
-              <SignaturePad label="Za zapůjčitele (Podpis)" />
-              <SignaturePad label="Za vypůjčitele (Podpis)" />
+              <SignaturePad label="Za zapůjčitele (Podpis)" printName={data.responsibleOwner} printDate={data.issueDate} />
+              <SignaturePad
+                label="Za vypůjčitele (Podpis)"
+                printName={[data.borrower, data.contactPerson].filter(Boolean).join(" / ")}
+                printDate={data.issueDate}
+              />
             </div>
           </section>
         </div>
