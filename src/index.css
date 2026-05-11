@@ -2,6 +2,10 @@
 @tailwind components;
 @tailwind utilities;
 
+.screen-only-hidden {
+  display: none;
+}
+
 @media print {
   @page {
     margin: 1.2cm;
@@ -24,6 +28,15 @@
     margin: 0 !important;
     padding: 0 !important;
     width: 100% !important;
+  }
+
+  .screen-only-hidden {
+    display: block !important;
+  }
+
+  .print-page-break-before {
+    break-before: page !important;
+    page-break-before: always !important;
   }
 
   input,

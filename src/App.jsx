@@ -1,12 +1,29 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Camera, CheckCircle2, Cpu, PlusCircle, Printer, Trash2, User, Calendar } from "lucide-react";
+import { Calendar, Camera, CheckCircle2, Cpu, FolderOpen, PlusCircle, Printer, Save, Trash2, User, X } from "lucide-react";
 
 // --- Constants & Config ---
 const ROBOT_LIST = ["Adam", "Božena", "Emil", "Cvrček", "Fík"];
 
+const DB_NAME = "unitree-protocol-archive";
+const DB_VERSION = 1;
+const STORE_NAME = "protocols";
+
+const makeId = () => {
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+  return `protocol-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+};
+
+const clone = (value) => {
+  if (typeof structuredClone === "function") return structuredClone(value);
+  return JSON.parse(JSON.stringify(value));
+};
+
 const INITIAL_STATE = {
+  id: null,
+  createdAt: null,
+  updatedAt: null,
   mode: "issue", // 'issue' or 'return'
-  issueDate: new Date().toISOString().split("T")[0],
+  issueDate: "",
   borrower: "",
   contactPerson: "",
   purpose: "",
@@ -25,10 +42,9 @@ const INITIAL_STATE = {
     physical: [
       { id: "p1", label: "Robot Unitree G1 – kompletní, bez viditelného poškození", checked: false },
       { id: "p2", label: "Ovladač (controller) – funkční, čistý, včetně páček", checked: false },
-      { id: "p3", label: "Ovládací telefon – nabitý, přihlášený", checked: false },
-      { id: "p4", label: "Nabíječka robota – včetně kabelu a adaptéru", checked: false },
-      { id: "p5", label: "Baterie – plně nabitá", checked: false },
-      { id: "p6", label: "Přepravní kufr", checked: false }
+      { id: "p3", label: "Nabíječka robota – včetně kabelu a adaptéru", checked: false },
+      { id: "p4", label: "Baterie – plně nabitá", checked: false },
+      { id: "p5", label: "Přepravní kufr", checked: false }
     ],
     condition: [
       { id: "c1", label: "Všechny klouby se pohybují volně, žádné neobvyklé zvuky", checked: false },
@@ -50,7 +66,7 @@ const INITIAL_STATE = {
   returnNote: "",
   returnChecklist: {
     physical: [
-      { id: "rp1", label: "Všechny položky vráceny: robot, ovladač, telefon, baterie, nabíječka", checked: false },
+      { id: "rp1", label: "Všechny položky vráceny: robot, ovladač, baterie, nabíječka", checked: false },
       { id: "rp2", label: "Nic nechybí ani není poškozené", checked: false },
       { id: "rp3", label: "Robot čistý, bez nečistot či prachu", checked: false },
       { id: "rp4", label: "Konektory a porty nepoškozené", checked: false }
@@ -75,12 +91,111 @@ const INITIAL_STATE = {
     responsibility: false,
     correctness: false
   },
-  photos: []
+  photos: [],
+  signatures: {
+    owner: "",
+    borrower: ""
+  }
+};
+
+const createInitialState = () => ({
+  ...clone(INITIAL_STATE),
+  issueDate: new Date().toISOString().split("T")[0]
+});
+
+const openArchiveDb = () =>
+  new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME, { keyPath: "id" });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+
+const withArchiveStore = async (mode, callback) => {
+  const db = await openArchiveDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, mode);
+    const store = tx.objectStore(STORE_NAME);
+    const result = callback(store);
+    tx.oncomplete = () => {
+      db.close();
+      resolve(result);
+    };
+    tx.onerror = () => {
+      db.close();
+      reject(tx.error);
+    };
+    tx.onabort = () => {
+      db.close();
+      reject(tx.error);
+    };
+  });
+};
+
+const listSavedProtocols = async () => {
+  const records = await withArchiveStore("readonly", (store) => {
+    const request = store.getAll();
+    return new Promise((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result || []);
+      request.onerror = () => reject(request.error);
+    });
+  });
+
+  return records
+    .map(({ id, createdAt, updatedAt, mode, borrower, contactPerson, selectedRobots, dateFrom, dateTo }) => ({
+      id,
+      createdAt,
+      updatedAt,
+      mode,
+      borrower,
+      contactPerson,
+      selectedRobots: selectedRobots || [],
+      dateFrom,
+      dateTo
+    }))
+    .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+};
+
+const getSavedProtocol = async (id) =>
+  withArchiveStore("readonly", (store) => {
+    const request = store.get(id);
+    return new Promise((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => reject(request.error);
+    });
+  });
+
+const putSavedProtocol = async (record) =>
+  withArchiveStore("readwrite", (store) => {
+    store.put(record);
+  });
+
+const removeSavedProtocol = async (id) =>
+  withArchiveStore("readwrite", (store) => {
+    store.delete(id);
+  });
+
+const formatArchiveDate = (value) => {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString("cs-CZ", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
 };
 
 // --- Sub-Components ---
 
-const SignaturePad = ({ label, printName, printDate }) => {
+const SignaturePad = ({ label, printName, printDate, value, onChange }) => {
   const canvasRef = useRef(null);
   const [isDrawing, setIsDrawing] = useState(false);
 
@@ -93,6 +208,20 @@ const SignaturePad = ({ label, printName, printDate }) => {
     ctx.strokeStyle = "#000";
   }, []);
 
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!value) return;
+
+    const image = new Image();
+    image.onload = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+    };
+    image.src = value;
+  }, [value]);
+
   const getCoordinates = (e) => {
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
@@ -104,7 +233,13 @@ const SignaturePad = ({ label, printName, printDate }) => {
     };
   };
 
+  const persist = () => {
+    const canvas = canvasRef.current;
+    onChange?.(canvas.toDataURL("image/png"));
+  };
+
   const startDrawing = (e) => {
+    e.preventDefault();
     setIsDrawing(true);
     const coords = getCoordinates(e);
     const ctx = canvasRef.current.getContext("2d");
@@ -113,11 +248,13 @@ const SignaturePad = ({ label, printName, printDate }) => {
   };
 
   const stopDrawing = () => {
+    if (isDrawing) persist();
     setIsDrawing(false);
   };
 
   const draw = (e) => {
     if (!isDrawing) return;
+    e.preventDefault();
     const coords = getCoordinates(e);
     const ctx = canvasRef.current.getContext("2d");
     ctx.lineTo(coords.x, coords.y);
@@ -128,6 +265,7 @@ const SignaturePad = ({ label, printName, printDate }) => {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    onChange?.("");
   };
 
   return (
@@ -394,16 +532,108 @@ const DatePickerPopover = ({
 };
 
 export default function App() {
-  const [data, setData] = useState(INITIAL_STATE);
+  const [data, setData] = useState(() => createInitialState());
+  const [savedProtocols, setSavedProtocols] = useState([]);
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [storageError, setStorageError] = useState("");
+  const [saveStatus, setSaveStatus] = useState("");
+
+  const refreshArchive = async () => {
+    try {
+      setStorageError("");
+      setSavedProtocols(await listSavedProtocols());
+    } catch (error) {
+      console.error(error);
+      setStorageError("Archiv se nepodařilo načíst. Zkontrolujte oprávnění úložiště v prohlížeči.");
+    }
+  };
+
+  useEffect(() => {
+    refreshArchive();
+  }, []);
 
   const handleReset = () => {
     if (window.confirm("Opravdu chcete vytvořit nový protokol? Všechna zadaná data budou smazána.")) {
-      setData(INITIAL_STATE);
+      setData(createInitialState());
+      setSaveStatus("");
       window.scrollTo(0, 0);
     }
   };
 
-  const handlePrint = () => {
+  const persistCurrentProtocol = async () => {
+    const now = new Date().toISOString();
+    const record = {
+      ...data,
+      id: data.id || makeId(),
+      createdAt: data.createdAt || now,
+      updatedAt: now,
+      signatures: data.signatures || { owner: "", borrower: "" }
+    };
+
+    await putSavedProtocol(record);
+    setData(record);
+    await refreshArchive();
+    setSaveStatus(`Uloženo ${formatArchiveDate(now)}`);
+    return record;
+  };
+
+  const handleSave = async () => {
+    try {
+      setStorageError("");
+      await persistCurrentProtocol();
+    } catch (error) {
+      console.error(error);
+      setStorageError("Protokol se nepodařilo uložit. Pravděpodobně došlo místo v úložišti prohlížeče.");
+    }
+  };
+
+  const handleLoadProtocol = async (id) => {
+    try {
+      setStorageError("");
+      const record = await getSavedProtocol(id);
+      if (!record) {
+        setStorageError("Vybraný protokol už v archivu není.");
+        await refreshArchive();
+        return;
+      }
+      setData({
+        ...createInitialState(),
+        ...record,
+        signatures: record.signatures || { owner: "", borrower: "" }
+      });
+      setArchiveOpen(false);
+      setSaveStatus(`Načteno ${formatArchiveDate(record.updatedAt)}`);
+      window.scrollTo(0, 0);
+    } catch (error) {
+      console.error(error);
+      setStorageError("Protokol se nepodařilo načíst.");
+    }
+  };
+
+  const handleDeleteProtocol = async (id) => {
+    if (!window.confirm("Opravdu chcete tento uložený protokol odstranit z archivu?")) return;
+
+    try {
+      setStorageError("");
+      await removeSavedProtocol(id);
+      if (data.id === id) {
+        setData(createInitialState());
+        setSaveStatus("");
+      }
+      await refreshArchive();
+    } catch (error) {
+      console.error(error);
+      setStorageError("Protokol se nepodařilo odstranit.");
+    }
+  };
+
+  const handlePrint = async () => {
+    try {
+      await persistCurrentProtocol();
+    } catch (error) {
+      console.error(error);
+      setStorageError("Před tiskem se protokol nepodařilo uložit do archivu.");
+    }
     window.print();
   };
 
@@ -459,11 +689,23 @@ export default function App() {
     }));
   };
 
+  const updateSignature = (key, value) => {
+    setData((prev) => ({
+      ...prev,
+      signatures: {
+        ...(prev.signatures || { owner: "", borrower: "" }),
+        [key]: value
+      }
+    }));
+  };
+
+  const protocolPrintRobots = data.selectedRobots.length > 0 ? data.selectedRobots : [""];
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans pb-20 print:bg-white print:p-0">
       {/* Sticky Header */}
       <header className="sticky top-0 z-50 bg-white/90 backdrop-blur-md border-b border-slate-200 px-4 py-3 shadow-sm print:hidden">
-        <div className="max-w-5xl mx-auto flex flex-wrap items-center justify-between gap-4">
+        <div className="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="bg-slate-900 text-white p-2 rounded-lg">
               <Cpu size={24} />
@@ -494,6 +736,89 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2">
+            <div className="relative">
+              <button
+                onClick={() => setArchiveOpen((open) => !open)}
+                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+              >
+                <FolderOpen size={18} />
+                <span className="hidden sm:inline">Archiv</span>
+                {savedProtocols.length > 0 ? (
+                  <span className="min-w-5 h-5 px-1.5 rounded-full bg-slate-900 text-white text-[10px] font-black flex items-center justify-center">
+                    {savedProtocols.length}
+                  </span>
+                ) : null}
+              </button>
+
+              {archiveOpen ? (
+                <div className="absolute right-0 top-full mt-2 w-[min(92vw,420px)] rounded-2xl border border-slate-200 bg-white shadow-2xl overflow-hidden">
+                  <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-slate-100">
+                    <div>
+                      <div className="text-sm font-black text-slate-900">Uložené protokoly</div>
+                      <div className="text-[11px] text-slate-500">Uloženo lokálně v tomto prohlížeči</div>
+                    </div>
+                    <button
+                      onClick={() => setArchiveOpen(false)}
+                      className="p-2 rounded-lg text-slate-400 hover:text-slate-900 hover:bg-slate-100"
+                      aria-label="Zavřít archiv"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+
+                  {storageError ? <div className="px-4 py-3 text-xs font-semibold text-red-600 bg-red-50">{storageError}</div> : null}
+
+                  <div className="max-h-[360px] overflow-y-auto">
+                    {savedProtocols.length === 0 ? (
+                      <div className="px-4 py-8 text-sm text-slate-500 text-center">Zatím není uložený žádný protokol.</div>
+                    ) : (
+                      savedProtocols.map((protocol) => {
+                        const title = [
+                          protocol.selectedRobots?.join(", "),
+                          protocol.borrower || protocol.contactPerson || "Bez názvu"
+                        ]
+                          .filter(Boolean)
+                          .join(" - ");
+                        const dates = [protocol.dateFrom, protocol.dateTo].filter(Boolean).join(" až ");
+
+                        return (
+                          <div key={protocol.id} className="flex items-start gap-3 px-4 py-3 border-b border-slate-100 last:border-b-0">
+                            <button onClick={() => handleLoadProtocol(protocol.id)} className="min-w-0 flex-1 text-left group">
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase ${
+                                    protocol.mode === "return" ? "bg-orange-100 text-orange-700" : "bg-blue-100 text-blue-700"
+                                  }`}
+                                >
+                                  {protocol.mode === "return" ? "Vrácení" : "Vydání"}
+                                </span>
+                                <span className="text-[11px] text-slate-400">{formatArchiveDate(protocol.updatedAt)}</span>
+                              </div>
+                              <div className="mt-1 font-bold text-sm text-slate-900 truncate group-hover:text-blue-600">{title}</div>
+                              {dates ? <div className="mt-0.5 text-xs text-slate-500 truncate">{dates}</div> : null}
+                            </button>
+                            <button
+                              onClick={() => handleDeleteProtocol(protocol.id)}
+                              className="p-2 rounded-lg text-slate-300 hover:text-red-600 hover:bg-red-50"
+                              aria-label="Smazat uložený protokol"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+            <button
+              onClick={handleSave}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+            >
+              <Save size={18} />
+              <span className="hidden sm:inline">Uložit</span>
+            </button>
             <button
               onClick={handleReset}
               className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
@@ -512,20 +837,31 @@ export default function App() {
             </button>
           </div>
         </div>
+        {(saveStatus || storageError) && !archiveOpen ? (
+          <div className="max-w-6xl mx-auto mt-2 text-right text-[11px] font-semibold">
+            {storageError ? <span className="text-red-600">{storageError}</span> : <span className="text-slate-500">{saveStatus}</span>}
+          </div>
+        ) : null}
       </header>
 
       {/* Protocol Canvas */}
-      <main className="max-w-4xl mx-auto mt-8 mb-12 bg-white shadow-2xl border border-slate-200 rounded-2xl overflow-hidden print:shadow-none print:border-0 print:mt-0 print:max-w-full">
+      {protocolPrintRobots.map((protocolRobot, protocolIndex) => (
+        <main
+          key={protocolRobot || "single-protocol"}
+          className={`max-w-4xl mx-auto mt-8 mb-12 bg-white shadow-2xl border border-slate-200 rounded-2xl overflow-hidden print:shadow-none print:border-0 print:mt-0 print:max-w-full ${
+            protocolIndex > 0 ? "screen-only-hidden print-page-break-before" : ""
+          }`}
+        >
         {/* Dynamic Header for Printing */}
         <div className="hidden print:flex justify-between items-start border-b-4 border-slate-900 pb-6 p-10">
           <div>
             <h1 className="text-4xl font-black uppercase tracking-tighter mb-1">Protokol o předání</h1>
             <div className="mt-6 flex flex-wrap gap-2">
-              {data.selectedRobots.map((r) => (
-                <span key={r} className="bg-slate-900 text-white px-4 py-1.5 rounded-md font-mono text-sm font-bold">
-                  ROBOT: {r}
+              {protocolRobot ? (
+                <span className="bg-slate-900 text-white px-4 py-1.5 rounded-md font-mono text-sm font-bold">
+                  ROBOT: {protocolRobot}
                 </span>
-              ))}
+              ) : null}
             </div>
           </div>
         </div>
@@ -795,21 +1131,25 @@ export default function App() {
           {/* Section: Signatures */}
           <section className="pt-6 print-avoid-break">
             <div className="flex flex-col md:flex-row gap-12 justify-center items-center">
-              <SignaturePad label="Za zapůjčitele (Podpis)" printName={data.responsibleOwner} printDate={data.issueDate} />
+              <SignaturePad
+                label="Za zapůjčitele (Podpis)"
+                printName={data.responsibleOwner}
+                printDate={data.issueDate}
+                value={data.signatures?.owner || ""}
+                onChange={(value) => updateSignature("owner", value)}
+              />
               <SignaturePad
                 label="Za vypůjčitele (Podpis)"
                 printName={[data.borrower, data.contactPerson].filter(Boolean).join(" / ")}
                 printDate={data.issueDate}
+                value={data.signatures?.borrower || ""}
+                onChange={(value) => updateSignature("borrower", value)}
               />
             </div>
           </section>
         </div>
-
-        {/* Legal Footer for PDF */}
-        <div className="hidden print:block p-10 border-t border-slate-100 bg-slate-50 mt-12 text-[9px] text-slate-400 leading-relaxed italic">
-          Protokol je vyhotoven ve dvou stejnopisech, z nichž každá strana obdrží jeden. Dokument slouží jako důkaz o stavu zařízení v době předání/převzetí. Jakékoli závady zjištěné po podpisu, které nejsou v tomto dokumentu uvedeny, jdou k tíži vypůjčitele.
-        </div>
-      </main>
+        </main>
+      ))}
     </div>
   );
 }

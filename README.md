@@ -6,9 +6,11 @@ React webová aplikace v češtině pro vytvoření předávacího protokolu př
 
 - výběr jednoho nebo více robotů: Adam, Božena, Emil, Cvrček, Fík,
 - blokace duplicitních robotů v jedné zápůjčce,
+- při tisku/PDF se pro každého vybraného robota vytvoří samostatný protokol,
 - horní přepínač režimu editace: vydání nebo vrácení,
 - checklisty pro vydání i vrácení,
 - poznámky, podpisy na canvasu a fotodokumentace,
+- lokální archiv protokolů v prohlížeči přes IndexedDB,
 - tiskový výstup vhodný pro uložení jako PDF.
 
 ## Stack
@@ -50,4 +52,4 @@ Výsledná URL bude typicky:
 https://UZIVATEL.github.io/NAZEV-REPOZITARE/
 ```
 
-Poznámka: data z formuláře se nikam neposílají ani neukládají na server. Vše běží v prohlížeči zákazníka a PDF se ukládá přes tiskový dialog.
+Poznámka: data z formuláře se nikam neposílají ani neukládají na server. Archiv protokolů je uložený lokálně v IndexedDB daného prohlížeče a PDF se vytváří přes tiskový dialog. Pokud má být archiv sdílený mezi více počítači nebo uživateli, bude potřeba přidat backendové úložiště.
