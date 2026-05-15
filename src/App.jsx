@@ -1,12 +1,45 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Calendar, Camera, CheckCircle2, Cpu, FolderOpen, PlusCircle, Printer, Save, Trash2, User, X } from "lucide-react";
+import {
+  Calendar,
+  Camera,
+  CheckCircle2,
+  ChevronDown,
+  Cpu,
+  Pencil,
+  Printer,
+  Save,
+  Search,
+  Trash2,
+  User,
+  X
+} from "lucide-react";
+import { ArchiveIcon } from "@/components/ui/archive";
+import { PlusIcon } from "@/components/ui/plus";
+import { SettingsIcon } from "@/components/ui/settings";
 
 // --- Constants & Config ---
-const ROBOT_LIST = ["Adam", "Božena", "Emil", "Cvrček", "Fík"];
-
 const DB_NAME = "unitree-protocol-archive";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_NAME = "protocols";
+const CATEGORY_STORE = "deviceCategories";
+const DEVICE_STORE = "devices";
+
+const DEFAULT_CATEGORIES = [
+  { id: "cat-humanoids", name: "Humanoidi", sortOrder: 1, active: true },
+  { id: "cat-dogs", name: "Psi", sortOrder: 2, active: true },
+  { id: "cat-exoskeletons", name: "Exoskeletony", sortOrder: 3, active: true }
+];
+
+const DEFAULT_DEVICES = ["Adam", "Božena", "Emil", "Cvrček", "Fík"].map((name, index) => ({
+  id: `device-${index + 1}`,
+  name,
+  categoryId: "cat-humanoids",
+  model: "Unitree G1",
+  serialNumber: "",
+  active: true,
+  createdAt: "2026-01-01T00:00:00.000Z",
+  updatedAt: "2026-01-01T00:00:00.000Z"
+}));
 
 const makeId = () => {
   if (window.crypto?.randomUUID) return window.crypto.randomUUID();
@@ -32,6 +65,7 @@ const INITIAL_STATE = {
   handoverPlace: "",
   responsibleOwner: "",
   selectedRobots: [],
+  selectedDevices: [],
 
   // Issue Specific
   issueBattery: "",
@@ -111,16 +145,22 @@ const openArchiveDb = () =>
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         db.createObjectStore(STORE_NAME, { keyPath: "id" });
       }
+      if (!db.objectStoreNames.contains(CATEGORY_STORE)) {
+        db.createObjectStore(CATEGORY_STORE, { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains(DEVICE_STORE)) {
+        db.createObjectStore(DEVICE_STORE, { keyPath: "id" });
+      }
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
 
-const withArchiveStore = async (mode, callback) => {
+const withStore = async (storeName, mode, callback) => {
   const db = await openArchiveDb();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, mode);
-    const store = tx.objectStore(STORE_NAME);
+    const tx = db.transaction(storeName, mode);
+    const store = tx.objectStore(storeName);
     const result = callback(store);
     tx.oncomplete = () => {
       db.close();
@@ -137,6 +177,40 @@ const withArchiveStore = async (mode, callback) => {
   });
 };
 
+const withArchiveStore = (mode, callback) => withStore(STORE_NAME, mode, callback);
+
+const getAllFromStore = (storeName) =>
+  withStore(storeName, "readonly", (store) => {
+    const request = store.getAll();
+    return new Promise((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result || []);
+      request.onerror = () => reject(request.error);
+    });
+  });
+
+const putIntoStore = (storeName, record) =>
+  withStore(storeName, "readwrite", (store) => {
+    store.put(record);
+  });
+
+const sortCategories = (categories) =>
+  [...categories].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0) || String(a.name || "").localeCompare(String(b.name || ""), "cs"));
+
+const sortDevices = (devices) => [...devices].sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "cs"));
+
+const ensureDeviceCatalog = async () => {
+  const [categories, devices] = await Promise.all([getAllFromStore(CATEGORY_STORE), getAllFromStore(DEVICE_STORE)]);
+  if (categories.length === 0) {
+    await Promise.all(DEFAULT_CATEGORIES.map((category) => putIntoStore(CATEGORY_STORE, category)));
+  }
+  if (devices.length === 0) {
+    await Promise.all(DEFAULT_DEVICES.map((device) => putIntoStore(DEVICE_STORE, device)));
+  }
+};
+
+const listDeviceCategories = async () => sortCategories(await getAllFromStore(CATEGORY_STORE));
+const listDevices = async () => sortDevices(await getAllFromStore(DEVICE_STORE));
+
 const listSavedProtocols = async () => {
   const records = await withArchiveStore("readonly", (store) => {
     const request = store.getAll();
@@ -147,7 +221,7 @@ const listSavedProtocols = async () => {
   });
 
   return records
-    .map(({ id, createdAt, updatedAt, mode, borrower, contactPerson, selectedRobots, dateFrom, dateTo }) => ({
+    .map(({ id, createdAt, updatedAt, mode, borrower, contactPerson, selectedRobots, selectedDevices, dateFrom, dateTo }) => ({
       id,
       createdAt,
       updatedAt,
@@ -155,6 +229,7 @@ const listSavedProtocols = async () => {
       borrower,
       contactPerson,
       selectedRobots: selectedRobots || [],
+      selectedDevices: selectedDevices || [],
       dateFrom,
       dateTo
     }))
@@ -531,12 +606,368 @@ const DatePickerPopover = ({
   );
 };
 
+const getCategoryName = (categories, categoryId) => categories.find((category) => category.id === categoryId)?.name || "Bez kategorie";
+
+const toDeviceSnapshot = (device, categories) => ({
+  id: device.id,
+  name: device.name,
+  categoryName: getCategoryName(categories, device.categoryId),
+  model: device.model || "",
+  serialNumber: device.serialNumber || ""
+});
+
+const getProtocolDevices = (record) => {
+  if (Array.isArray(record.selectedDevices) && record.selectedDevices.length > 0) {
+    return record.selectedDevices.map((device) => ({
+      id: device.id || "",
+      name: device.name || "",
+      categoryName: device.categoryName || "",
+      model: device.model || "",
+      serialNumber: device.serialNumber || ""
+    }));
+  }
+  if (Array.isArray(record.selectedRobots) && record.selectedRobots.length > 0) {
+    return record.selectedRobots.map((name) => ({ id: "", name, categoryName: "", model: "", serialNumber: "" }));
+  }
+  return [];
+};
+
+const DeviceCombobox = ({ devices, categories, selectedDevices, onChange }) => {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const rootRef = useRef(null);
+  const selectedIds = new Set(selectedDevices.map((device) => device.id).filter(Boolean));
+  const selectedNames = new Set(selectedDevices.map((device) => device.name).filter(Boolean));
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e) => {
+      const root = rootRef.current;
+      if (!root) return;
+      if (!root.contains(e.target)) setOpen(false);
+    };
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  const normalizedQuery = query.trim().toLocaleLowerCase("cs-CZ");
+  const activeCategories = sortCategories(categories.filter((category) => category.active));
+  const activeCategoryIds = new Set(activeCategories.map((category) => category.id));
+  const activeDevices = sortDevices(
+    devices.filter((device) => {
+      if (!device.active) return false;
+      if (!activeCategoryIds.has(device.categoryId)) return false;
+      const categoryName = getCategoryName(categories, device.categoryId);
+      if (!normalizedQuery) return true;
+      return [device.name, device.model, device.serialNumber, categoryName]
+        .filter(Boolean)
+        .some((value) => String(value).toLocaleLowerCase("cs-CZ").includes(normalizedQuery));
+    })
+  );
+
+  const addDevice = (device) => {
+    if (selectedIds.has(device.id) || selectedNames.has(device.name)) return;
+    onChange([...selectedDevices, toDeviceSnapshot(device, categories)]);
+    setQuery("");
+    setOpen(false);
+  };
+
+  const removeDevice = (device) => {
+    onChange(selectedDevices.filter((selected) => selected.id !== device.id && selected.name !== device.name));
+  };
+
+  return (
+    <div ref={rootRef} className="relative">
+      <div className="min-h-[52px] rounded-2xl border border-slate-200 bg-white px-3 py-2 shadow-sm focus-within:ring-2 focus-within:ring-blue-500">
+        <div className="flex flex-wrap items-center gap-2">
+          {selectedDevices.map((device) => (
+            <span key={device.id || device.name} className="inline-flex max-w-full items-center gap-2 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-bold text-white">
+              <span className="truncate">{device.name}</span>
+              <button
+                type="button"
+                onClick={() => removeDevice(device)}
+                className="rounded p-0.5 text-white/70 hover:bg-white/10 hover:text-white"
+                aria-label={`Odebrat zařízení ${device.name}`}
+              >
+                <X size={13} />
+              </button>
+            </span>
+          ))}
+          <div className="flex min-w-[220px] flex-1 items-center gap-2">
+            <Search size={16} className="text-slate-400" />
+            <input
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setOpen(true);
+              }}
+              onFocus={() => setOpen(true)}
+              placeholder={selectedDevices.length === 0 ? "Vyberte zařízení" : "Přidat další zařízení"}
+              className="min-w-0 flex-1 border-0 bg-transparent py-1 text-sm font-medium outline-none placeholder:text-slate-400"
+            />
+            <button
+              type="button"
+              onClick={() => setOpen((value) => !value)}
+              className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+              aria-label="Otevřít výběr zařízení"
+            >
+              <ChevronDown size={16} />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {open ? (
+        <div className="absolute z-40 mt-2 max-h-[360px] w-full overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-2xl">
+          {activeDevices.length === 0 ? (
+            <div className="px-4 py-8 text-center text-sm font-medium text-slate-500">Žádné aktivní zařízení neodpovídá hledání.</div>
+          ) : (
+            activeCategories.map((category) => {
+              const categoryDevices = activeDevices.filter((device) => device.categoryId === category.id);
+              if (categoryDevices.length === 0) return null;
+              return (
+                <div key={category.id} className="border-b border-slate-100 last:border-b-0">
+                  <div className="sticky top-0 bg-slate-50 px-4 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">
+                    {category.name}
+                  </div>
+                  {categoryDevices.map((device) => {
+                    const selected = selectedIds.has(device.id) || selectedNames.has(device.name);
+                    return (
+                      <button
+                        key={device.id}
+                        type="button"
+                        disabled={selected}
+                        onClick={() => addDevice(device)}
+                        className={`flex w-full items-center justify-between gap-4 px-4 py-3 text-left transition-colors ${
+                          selected ? "cursor-not-allowed bg-slate-50 text-slate-300" : "hover:bg-blue-50"
+                        }`}
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-black text-slate-900">{device.name}</span>
+                          <span className="mt-0.5 block truncate text-xs font-medium text-slate-500">
+                            {[device.model, device.serialNumber].filter(Boolean).join(" · ") || "Bez doplňujících údajů"}
+                          </span>
+                        </span>
+                        <span className={`rounded-md px-2 py-1 text-[10px] font-black ${selected ? "bg-slate-200 text-slate-400" : "bg-slate-900 text-white"}`}>
+                          {selected ? "Vybráno" : "Přidat"}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            })
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
+const AdminPanel = ({ open, categories, devices, onClose, onSaveCategory, onSaveDevice }) => {
+  const emptyCategory = { id: "", name: "", sortOrder: categories.length + 1, active: true };
+  const emptyDevice = { id: "", name: "", categoryId: categories[0]?.id || "", model: "", serialNumber: "", active: true };
+  const [categoryForm, setCategoryForm] = useState(emptyCategory);
+  const [deviceForm, setDeviceForm] = useState(emptyDevice);
+
+  useEffect(() => {
+    if (!open) return;
+    setCategoryForm({ id: "", name: "", sortOrder: categories.length + 1, active: true });
+    setDeviceForm({ id: "", name: "", categoryId: categories[0]?.id || "", model: "", serialNumber: "", active: true });
+  }, [open, categories]);
+
+  if (!open) return null;
+
+  const submitCategory = (e) => {
+    e.preventDefault();
+    const name = categoryForm.name.trim();
+    if (!name) return;
+    onSaveCategory({ ...categoryForm, name, sortOrder: Number(categoryForm.sortOrder) || categories.length + 1 });
+    setCategoryForm({ id: "", name: "", sortOrder: categories.length + 1, active: true });
+  };
+
+  const submitDevice = (e) => {
+    e.preventDefault();
+    const name = deviceForm.name.trim();
+    if (!name || !deviceForm.categoryId) return;
+    onSaveDevice({
+      ...deviceForm,
+      name,
+      model: deviceForm.model.trim(),
+      serialNumber: deviceForm.serialNumber.trim()
+    });
+    setDeviceForm({ id: "", name: "", categoryId: categories[0]?.id || "", model: "", serialNumber: "", active: true });
+  };
+
+  const activeCategories = sortCategories(categories.filter((category) => category.active));
+
+  return (
+    <div className="fixed inset-0 z-[80] bg-slate-950/40 p-4 print:hidden">
+      <div className="mx-auto flex h-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div className="flex items-center justify-between gap-4 border-b border-slate-200 px-5 py-4">
+          <div>
+            <div className="text-sm font-black uppercase tracking-widest text-slate-900">Správa katalogu</div>
+            <div className="text-xs font-medium text-slate-500">Zařízení a kategorie jsou uložené lokálně v tomto prohlížeči.</div>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-900" aria-label="Zavřít správu">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[320px_minmax(0,1fr)]">
+          <div className="border-b border-slate-200 p-5 lg:border-b-0 lg:border-r">
+            <form onSubmit={submitCategory} className="space-y-4">
+              <div className="text-xs font-black uppercase tracking-widest text-slate-400">Kategorie</div>
+              <input
+                value={categoryForm.name}
+                onChange={(e) => setCategoryForm((prev) => ({ ...prev, name: e.target.value }))}
+                placeholder="Název kategorie"
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <div className="grid grid-cols-[1fr_auto] items-center gap-3">
+                <input
+                  type="number"
+                  min="1"
+                  value={categoryForm.sortOrder}
+                  onChange={(e) => setCategoryForm((prev) => ({ ...prev, sortOrder: e.target.value }))}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500"
+                  aria-label="Pořadí kategorie"
+                />
+                <label className="flex items-center gap-2 text-xs font-bold text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={categoryForm.active}
+                    onChange={(e) => setCategoryForm((prev) => ({ ...prev, active: e.target.checked }))}
+                    className="h-4 w-4 rounded border-slate-300 text-blue-600"
+                  />
+                  Aktivní
+                </label>
+              </div>
+              <button type="submit" className="w-full rounded-xl bg-slate-900 px-4 py-2 text-sm font-black text-white hover:bg-slate-800">
+                {categoryForm.id ? "Uložit kategorii" : "Přidat kategorii"}
+              </button>
+            </form>
+
+            <div className="mt-5 divide-y divide-slate-100 rounded-xl border border-slate-200">
+              {sortCategories(categories).map((category) => (
+                <div key={category.id} className="flex items-center justify-between gap-3 px-3 py-2">
+                  <div className="min-w-0">
+                    <div className={`truncate text-sm font-bold ${category.active ? "text-slate-900" : "text-slate-400"}`}>{category.name}</div>
+                    <div className="text-[10px] font-bold uppercase text-slate-400">Pořadí {category.sortOrder || 0}</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setCategoryForm({ ...category })}
+                    className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-900"
+                    aria-label={`Upravit kategorii ${category.name}`}
+                  >
+                    <Pencil size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="p-5">
+            <form onSubmit={submitDevice} className="grid grid-cols-1 gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 md:grid-cols-2">
+              <div className="md:col-span-2 text-xs font-black uppercase tracking-widest text-slate-400">Zařízení</div>
+              <input
+                value={deviceForm.name}
+                onChange={(e) => setDeviceForm((prev) => ({ ...prev, name: e.target.value }))}
+                placeholder="Název zařízení"
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <select
+                value={deviceForm.categoryId}
+                onChange={(e) => setDeviceForm((prev) => ({ ...prev, categoryId: e.target.value }))}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                {activeCategories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
+              <input
+                value={deviceForm.model}
+                onChange={(e) => setDeviceForm((prev) => ({ ...prev, model: e.target.value }))}
+                placeholder="Model / typ"
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <input
+                value={deviceForm.serialNumber}
+                onChange={(e) => setDeviceForm((prev) => ({ ...prev, serialNumber: e.target.value }))}
+                placeholder="Sériové číslo"
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <label className="flex items-center gap-2 text-xs font-bold text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={deviceForm.active}
+                  onChange={(e) => setDeviceForm((prev) => ({ ...prev, active: e.target.checked }))}
+                  className="h-4 w-4 rounded border-slate-300 text-blue-600"
+                />
+                Aktivní ve výběru
+              </label>
+              <button type="submit" className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-black text-white hover:bg-slate-800">
+                {deviceForm.id ? "Uložit zařízení" : "Přidat zařízení"}
+              </button>
+            </form>
+
+            <div className="mt-5 divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200">
+              {sortDevices(devices).map((device) => (
+                <div key={device.id} className="flex items-center justify-between gap-4 px-4 py-3">
+                  <div className="min-w-0">
+                    <div className={`truncate text-sm font-black ${device.active ? "text-slate-900" : "text-slate-400"}`}>{device.name}</div>
+                    <div className="mt-0.5 truncate text-xs font-medium text-slate-500">
+                      {[getCategoryName(categories, device.categoryId), device.model, device.serialNumber].filter(Boolean).join(" · ")}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setDeviceForm({ ...device })}
+                    className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-900"
+                    aria-label={`Upravit zařízení ${device.name}`}
+                  >
+                    <Pencil size={15} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export default function App() {
   const [data, setData] = useState(() => createInitialState());
   const [savedProtocols, setSavedProtocols] = useState([]);
+  const [deviceCategories, setDeviceCategories] = useState([]);
+  const [devices, setDevices] = useState([]);
   const [archiveOpen, setArchiveOpen] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
   const [storageError, setStorageError] = useState("");
+  const [catalogError, setCatalogError] = useState("");
   const [saveStatus, setSaveStatus] = useState("");
+  const settingsIconRef = useRef(null);
+  const archiveIconRef = useRef(null);
+  const plusIconRef = useRef(null);
+
+  const getIconAnimationHandlers = (iconRef) => ({
+    onMouseEnter: () => iconRef.current?.startAnimation(),
+    onMouseLeave: () => iconRef.current?.stopAnimation(),
+    onFocus: () => iconRef.current?.startAnimation(),
+    onBlur: () => iconRef.current?.stopAnimation()
+  });
 
   const refreshArchive = async () => {
     try {
@@ -548,8 +979,22 @@ export default function App() {
     }
   };
 
+  const refreshCatalog = async () => {
+    try {
+      setCatalogError("");
+      await ensureDeviceCatalog();
+      const [categories, catalogDevices] = await Promise.all([listDeviceCategories(), listDevices()]);
+      setDeviceCategories(categories);
+      setDevices(catalogDevices);
+    } catch (error) {
+      console.error(error);
+      setCatalogError("Katalog zařízení se nepodařilo načíst.");
+    }
+  };
+
   useEffect(() => {
     refreshArchive();
+    refreshCatalog();
   }, []);
 
   const handleReset = () => {
@@ -562,11 +1007,14 @@ export default function App() {
 
   const persistCurrentProtocol = async () => {
     const now = new Date().toISOString();
+    const protocolDevices = getProtocolDevices(data);
     const record = {
       ...data,
       id: data.id || makeId(),
       createdAt: data.createdAt || now,
       updatedAt: now,
+      selectedDevices: protocolDevices,
+      selectedRobots: protocolDevices.map((device) => device.name).filter(Boolean),
       signatures: data.signatures || { owner: "", borrower: "" }
     };
 
@@ -599,6 +1047,8 @@ export default function App() {
       setData({
         ...createInitialState(),
         ...record,
+        selectedDevices: getProtocolDevices(record),
+        selectedRobots: getProtocolDevices(record).map((device) => device.name).filter(Boolean),
         signatures: record.signatures || { owner: "", borrower: "" }
       });
       setArchiveOpen(false);
@@ -641,15 +1091,47 @@ export default function App() {
     setData((prev) => ({ ...prev, [field]: value }));
   };
 
-  const toggleRobot = (robot) => {
-    const current = data.selectedRobots;
-    if (current.includes(robot)) {
-      updateData(
-        "selectedRobots",
-        current.filter((r) => r !== robot)
-      );
-    } else {
-      updateData("selectedRobots", [...current, robot]);
+  const updateSelectedDevices = (selectedDevices) => {
+    setData((prev) => ({
+      ...prev,
+      selectedDevices,
+      selectedRobots: selectedDevices.map((device) => device.name).filter(Boolean)
+    }));
+  };
+
+  const saveCategory = async (category) => {
+    try {
+      setCatalogError("");
+      const record = {
+        ...category,
+        id: category.id || makeId(),
+        active: Boolean(category.active),
+        sortOrder: Number(category.sortOrder) || deviceCategories.length + 1
+      };
+      await putIntoStore(CATEGORY_STORE, record);
+      await refreshCatalog();
+    } catch (error) {
+      console.error(error);
+      setCatalogError("Kategorii se nepodařilo uložit.");
+    }
+  };
+
+  const saveDevice = async (device) => {
+    try {
+      setCatalogError("");
+      const now = new Date().toISOString();
+      const record = {
+        ...device,
+        id: device.id || makeId(),
+        active: Boolean(device.active),
+        createdAt: device.createdAt || now,
+        updatedAt: now
+      };
+      await putIntoStore(DEVICE_STORE, record);
+      await refreshCatalog();
+    } catch (error) {
+      console.error(error);
+      setCatalogError("Zařízení se nepodařilo uložit.");
     }
   };
 
@@ -699,7 +1181,8 @@ export default function App() {
     }));
   };
 
-  const protocolPrintRobots = data.selectedRobots.length > 0 ? data.selectedRobots : [""];
+  const selectedProtocolDevices = getProtocolDevices(data);
+  const protocolPrintDevices = selectedProtocolDevices.length > 0 ? selectedProtocolDevices : [{ name: "" }];
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans pb-20 print:bg-white print:p-0">
@@ -736,12 +1219,21 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setAdminOpen(true)}
+              {...getIconAnimationHandlers(settingsIconRef)}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+            >
+              <SettingsIcon ref={settingsIconRef} size={18} />
+              <span className="hidden sm:inline">Správa</span>
+            </button>
             <div className="relative">
               <button
                 onClick={() => setArchiveOpen((open) => !open)}
+                {...getIconAnimationHandlers(archiveIconRef)}
                 className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
               >
-                <FolderOpen size={18} />
+                <ArchiveIcon ref={archiveIconRef} size={18} />
                 <span className="hidden sm:inline">Archiv</span>
                 {savedProtocols.length > 0 ? (
                   <span className="min-w-5 h-5 px-1.5 rounded-full bg-slate-900 text-white text-[10px] font-black flex items-center justify-center">
@@ -773,8 +1265,9 @@ export default function App() {
                       <div className="px-4 py-8 text-sm text-slate-500 text-center">Zatím není uložený žádný protokol.</div>
                     ) : (
                       savedProtocols.map((protocol) => {
+                        const protocolDevices = getProtocolDevices(protocol);
                         const title = [
-                          protocol.selectedRobots?.join(", "),
+                          protocolDevices.map((device) => device.name).filter(Boolean).join(", "),
                           protocol.borrower || protocol.contactPerson || "Bez názvu"
                         ]
                           .filter(Boolean)
@@ -821,9 +1314,10 @@ export default function App() {
             </button>
             <button
               onClick={handleReset}
+              {...getIconAnimationHandlers(plusIconRef)}
               className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
             >
-              <PlusCircle size={18} />
+              <PlusIcon ref={plusIconRef} size={18} />
               <span className="hidden sm:inline">Nový</span>
             </button>
             <button
@@ -842,12 +1336,22 @@ export default function App() {
             {storageError ? <span className="text-red-600">{storageError}</span> : <span className="text-slate-500">{saveStatus}</span>}
           </div>
         ) : null}
+        {catalogError ? <div className="max-w-6xl mx-auto mt-2 text-right text-[11px] font-semibold text-red-600">{catalogError}</div> : null}
       </header>
 
+      <AdminPanel
+        open={adminOpen}
+        categories={deviceCategories}
+        devices={devices}
+        onClose={() => setAdminOpen(false)}
+        onSaveCategory={saveCategory}
+        onSaveDevice={saveDevice}
+      />
+
       {/* Protocol Canvas */}
-      {protocolPrintRobots.map((protocolRobot, protocolIndex) => (
+      {protocolPrintDevices.map((protocolDevice, protocolIndex) => (
         <main
-          key={protocolRobot || "single-protocol"}
+          key={protocolDevice.id || protocolDevice.name || "single-protocol"}
           className={`max-w-4xl mx-auto mt-8 mb-12 bg-white shadow-2xl border border-slate-200 rounded-2xl overflow-hidden print:shadow-none print:border-0 print:mt-0 print:max-w-full ${
             protocolIndex > 0 ? "screen-only-hidden print-page-break-before" : ""
           }`}
@@ -857,11 +1361,21 @@ export default function App() {
           <div>
             <h1 className="text-4xl font-black uppercase tracking-tighter mb-1">Protokol o předání</h1>
             <div className="mt-6 flex flex-wrap gap-2">
-              {protocolRobot ? (
+              {protocolDevice.name ? (
                 <span className="bg-slate-900 text-white px-4 py-1.5 rounded-md font-mono text-sm font-bold">
-                  ROBOT: {protocolRobot}
+                  ZAŘÍZENÍ: {protocolDevice.name}
                 </span>
               ) : null}
+              {protocolDevice.categoryName ? (
+                <span className="bg-slate-100 text-slate-900 px-4 py-1.5 rounded-md font-mono text-sm font-bold">
+                  {protocolDevice.categoryName}
+                </span>
+              ) : null}
+              {[protocolDevice.model, protocolDevice.serialNumber].filter(Boolean).map((value) => (
+                <span key={value} className="bg-slate-100 text-slate-900 px-4 py-1.5 rounded-md font-mono text-sm font-bold">
+                  {value}
+                </span>
+              ))}
             </div>
           </div>
         </div>
@@ -870,21 +1384,12 @@ export default function App() {
           {/* Section: Robot Selector (UI only) */}
           <section className="print:hidden">
             <label className="block text-xs font-black text-slate-400 mb-3 uppercase tracking-[0.2em]">Výběr zařízení k protokolu</label>
-            <div className="flex flex-wrap gap-3">
-              {ROBOT_LIST.map((robot) => (
-                <button
-                  key={robot}
-                  onClick={() => toggleRobot(robot)}
-                  className={`px-6 py-2.5 rounded-xl border-2 transition-all font-bold text-sm ${
-                    data.selectedRobots.includes(robot)
-                      ? "bg-slate-900 border-slate-900 text-white shadow-lg scale-105"
-                      : "bg-white border-slate-200 text-slate-400 hover:border-slate-300"
-                  }`}
-                >
-                  {robot}
-                </button>
-              ))}
-            </div>
+            <DeviceCombobox
+              devices={devices}
+              categories={deviceCategories}
+              selectedDevices={getProtocolDevices(data)}
+              onChange={updateSelectedDevices}
+            />
           </section>
 
           {/* Section: Identification */}
