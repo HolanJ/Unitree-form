@@ -1616,9 +1616,9 @@ export default function App() {
 
             <div className="space-y-4">
               {Object.entries({
-                safety: "Vypůjčitel stvrzuje, že byl proškolen v ovládání zařízení a seznámen s bezpečnostními riziky.",
-                responsibility: "Vypůjčitel bere na vědomí odpovědnost za případné škody způsobené neodborným zacházením.",
-                correctness: "Smluvní strany prohlašují, že údaje v protokolu odpovídají skutečnému stavu věci."
+                safety: "Budu Komplet Robot užívat řádně a bezpečně, s péčí řádného hospodáře, v souladu s jeho účelem, získanými pokyny či školením a platnými právními předpisy; zároveň zajistím jeho řádné skladování, údržbu a provoz.",
+                responsibility: "Nebudu Komplet Robot přenechávat k užití třetím osobám ani nesvěřím jeho ovládání osobě bez potřebných technických znalostí nebo jiné třetí osobě bez předchozího písemného souhlasu Alza.cz a.s.",
+                correctness: "Beru na vědomí bezpečnostní a odpovědnostní pravidla, zejména povinnost dodržovat při používání odstup minimálně 3 metry, zamezit styku Kompletu Robota s kapalinami a nevystavovat jej nevhodným vnějším vlivům; současně beru na vědomí, že odpovídám za škody způsobené na Kompletu Robota nebo jeho provozem od okamžiku převzetí až do jeho řádného vrácení."
               }).map(([key, label]) => (
                 <label key={key} className="flex items-start gap-4 cursor-pointer group">
                   <input
