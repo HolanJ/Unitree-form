@@ -7,13 +7,13 @@ import {
   Cpu,
   Pencil,
   Printer,
-  Save,
   Search,
   Trash2,
   User,
   X
 } from "lucide-react";
 import { ArchiveIcon } from "@/components/ui/archive";
+import { BookmarkIcon } from "@/components/ui/bookmark";
 import { PlusIcon } from "@/components/ui/plus";
 import { SettingsIcon } from "@/components/ui/settings";
 
@@ -960,6 +960,7 @@ export default function App() {
   const [saveStatus, setSaveStatus] = useState("");
   const settingsIconRef = useRef(null);
   const archiveIconRef = useRef(null);
+  const bookmarkIconRef = useRef(null);
   const plusIconRef = useRef(null);
 
   const getIconAnimationHandlers = (iconRef) => ({
@@ -1307,9 +1308,10 @@ export default function App() {
             </div>
             <button
               onClick={handleSave}
+              {...getIconAnimationHandlers(bookmarkIconRef)}
               className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
             >
-              <Save size={18} />
+              <BookmarkIcon ref={bookmarkIconRef} size={18} />
               <span className="hidden sm:inline">Uložit</span>
             </button>
             <button
